@@ -2,12 +2,10 @@ import {
   identity,
   multiply,
   transpose,
-  complex,
   Matrix,
   matrix,
   random,
   lusolve,
-  lsolve,
 } from "mathjs";
 
 function circleArea(radius: number): number {
