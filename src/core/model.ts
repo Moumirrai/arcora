@@ -7,5 +7,12 @@ export class Model {
   public readonly elements: Map<string, Element> = new Map();
   public readonly materials: Map<string, Material> = new Map();
 
-  public addNode() {}
+  public dirty = false;
+
+  public setNodes(nodes: Map<string, Node>): void {
+    this.nodes.clear();
+    for (const [id, node] of nodes) {
+      this.nodes.set(id, node);
+    }
+  }
 }
