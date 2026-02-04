@@ -55,4 +55,46 @@ describe("Element class", () => {
     const k = element.stiffnessMatrix;
     expect(k).toBeDefined();
   });
+
+  it("returns false for dirty after creation", () => {
+    const element = new Element(model, {
+      id: "element-5",
+      nodeIDs: [nodeA.id, nodeB.id],
+    });
+    expect(element.dirty).toBe(false);
+  });
+
+  it("returns true for dirty when node position changes", () => {
+    const element = new Element(model, {
+      id: "element-6",
+      nodeIDs: [nodeA.id, nodeB.id],
+    });
+    expect(element.dirty).toBe(false);
+    nodeA.pos = { x: 1, z: 0 };
+    expect(element.dirty).toBe(true);
+  });
+
+  it("returns true for dirty even after cleanDirty if nodes are dirty", () => {
+    const element = new Element(model, {
+      id: "element-7",
+      nodeIDs: [nodeA.id, nodeB.id],
+    });
+    nodeB.pos = { x: 4, z: 4 };
+    expect(element.dirty).toBe(true);
+    element.cleanDirty();
+    expect(element.dirty).toBe(true); // still true because node is dirty
+  });
+
+  it("returns false for dirty after cleaning node dirty", () => {
+    const element = new Element(model, {
+      id: "element-8",
+      nodeIDs: [nodeA.id, nodeB.id],
+    });
+    nodeA.cleanDirty();
+    nodeB.cleanDirty();
+    nodeA.pos = { x: 2, z: 0 };
+    expect(element.dirty).toBe(true);
+    nodeA.cleanDirty();
+    expect(element.dirty).toBe(false);
+  });
 });
