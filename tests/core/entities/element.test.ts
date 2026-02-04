@@ -54,6 +54,5 @@ describe("Element class", () => {
 
     const k = element.stiffnessMatrix;
     expect(k).toBeDefined();
-    console.log(k);
   });
 });

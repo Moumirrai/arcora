@@ -1,7 +1,7 @@
-import type { Node } from "./node";
 import { matrix } from "mathjs";
-import type { Matrix } from "mathjs";
+import { multiply, type Matrix } from "mathjs";
 import type { Model } from "../model";
+import type { Node } from "./node";
 
 export interface ElementData {
   nodeIDs: readonly [string, string];
@@ -14,15 +14,18 @@ export type ElementDataPartial = Partial<ElementData> & {
 
 export class Element {
   public readonly nodeIDs: readonly [string, string];
-  
+
   #model: Model;
-  
+
   #len: number = 0;
   #sine: number = 0;
   #cosine: number = 0;
   #transformMatrix: Matrix | undefined;
   #stiffnessMatrix: Matrix | undefined;
   #dirty = false;
+
+  #nodeA: Node | undefined;
+  #nodeB: Node | undefined;
 
   constructor(model: Model, data: ElementDataPartial) {
     this.#model = model;
@@ -31,17 +34,20 @@ export class Element {
   }
 
   updateCache(): void {
-    const nA = this.#model.nodes.get(this.nodeIDs[0]);
-    const nB = this.#model.nodes.get(this.nodeIDs[1]);
-    if (!nA || !nB) {
+    this.#nodeA = this.#model.nodes.get(this.nodeIDs[0]);
+    this.#nodeB = this.#model.nodes.get(this.nodeIDs[1]);
+    if (!this.#nodeA || !this.#nodeB) {
       throw new Error(
         `Node ${this.nodeIDs[0]} or ${this.nodeIDs[1]} does not exist`
       );
     }
 
-    this.#len = Math.hypot(nB.pos.x - nA.pos.x, nB.pos.z - nA.pos.z);
-    this.#cosine = (nB.pos.x - nA.pos.x) / this.#len;
-    this.#sine = (nB.pos.z - nA.pos.z) / this.#len;
+    this.#len = Math.hypot(
+      this.#nodeB.pos.x - this.#nodeA.pos.x,
+      this.#nodeB.pos.z - this.#nodeA.pos.z
+    );
+    this.#cosine = (this.#nodeB.pos.x - this.#nodeA.pos.x) / this.#len;
+    this.#sine = (this.#nodeB.pos.z - this.#nodeA.pos.z) / this.#len;
 
     const c = this.#cosine;
     const s = this.#sine;
@@ -63,18 +69,51 @@ export class Element {
   private computeStiffnessMatrix(E: number, A: number, I: number): Matrix {
     const L = this.#len;
     const kLocal = matrix([
-      [A * E / L, 0, 0, -A * E / L, 0, 0],
-      [0, (12 * E * I) / (L ** 3), (6 * E * I) / (L ** 2), 0, (-12 * E * I) / (L ** 3), (6 * E * I) / (L ** 2)],
-      [0, (6 * E * I) / (L ** 2), (4 * E * I) / L, 0, (-6 * E * I) / (L ** 2), (2 * E * I) / L],
-      [-A * E / L, 0, 0, A * E / L, 0, 0],
-      [0, (-12 * E * I) / (L ** 3), (-6 * E * I) / (L ** 2), 0, (12 * E * I) / (L ** 3), (-6 * E * I) / (L ** 2)],
-      [0, (6 * E * I) / (L ** 2), (2 * E * I) / L, 0, (-6 * E * I) / (L ** 2), (4 * E * I) / L],
+      [(A * E) / L, 0, 0, (-A * E) / L, 0, 0],
+      [
+        0,
+        (12 * E * I) / L ** 3,
+        (6 * E * I) / L ** 2,
+        0,
+        (-12 * E * I) / L ** 3,
+        (6 * E * I) / L ** 2,
+      ],
+      [
+        0,
+        (6 * E * I) / L ** 2,
+        (4 * E * I) / L,
+        0,
+        (-6 * E * I) / L ** 2,
+        (2 * E * I) / L,
+      ],
+      [(-A * E) / L, 0, 0, (A * E) / L, 0, 0],
+      [
+        0,
+        (-12 * E * I) / L ** 3,
+        (-6 * E * I) / L ** 2,
+        0,
+        (12 * E * I) / L ** 3,
+        (-6 * E * I) / L ** 2,
+      ],
+      [
+        0,
+        (6 * E * I) / L ** 2,
+        (2 * E * I) / L,
+        0,
+        (-6 * E * I) / L ** 2,
+        (4 * E * I) / L,
+      ],
     ]);
     return kLocal;
   }
 
   get dirty(): boolean {
-    return this.#dirty;
+    // If element is dirty or any of the child nodes are dirty return true
+    return (
+      this.#dirty ||
+      (this.#nodeA?.dirty ?? true) ||
+      (this.#nodeB?.dirty ?? true)
+    );
   }
 
   cleanDirty(): void {
