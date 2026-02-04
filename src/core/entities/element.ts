@@ -1,5 +1,5 @@
 import { matrix } from "mathjs";
-import { multiply, type Matrix } from "mathjs";
+import { multiply, transpose, type Matrix } from "mathjs";
 import type { Model } from "../model";
 import type { Node } from "./node";
 
@@ -105,6 +105,10 @@ export class Element {
       ],
     ]);
     return kLocal;
+    return multiply(
+      multiply(transpose(this.#transformMatrix!), kLocal),
+      this.#transformMatrix!
+    );
   }
 
   get dirty(): boolean {
