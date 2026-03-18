@@ -3,11 +3,9 @@
   "version": "0.0.1",
   "author": "Moumirrai",
   "main": "dist/index.js",
-  "module": "src/index.ts",
+  "module": "lib/index.ts",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@typescript-eslint/eslint-plugin": "^8.56.0",
-    "@typescript-eslint/parser": "^8.56.0",
     "@vitest/ui": "^4.0.18",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
@@ -24,6 +22,7 @@
   "private": true,
   "scripts": {
     "build": "tsdown",
+    "build:wasm": "zig build",
     "test": "vitest",
     "test-ui": "vitest --ui",
     "bench": "vitest bench",
@@ -32,7 +31,6 @@
   },
   "type": "module",
   "dependencies": {
-    "mathjs": "^15.1.1",
-    "uuid": "^13.0.0"
+    "@types/node": "^25.5.0"
   }
 }
