@@ -24,7 +24,8 @@
   "scripts": {
     "build": "zig build && tsdown && cp zig-out/bin/arcora.wasm dist/arcora.wasm",
     "build:wasm": "zig build",
-    "test": "zig build && vitest",
+    "test": "zig build test-zig --summary all && zig build && vitest",
+    "test:zig": "zig build test-zig --summary all",
     "test-ui": "zig build && vitest --ui",
     "bench": "vitest bench",
     "lint": "eslint src/**/*.ts",
