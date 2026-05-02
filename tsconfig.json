@@ -7,6 +7,13 @@
     "moduleDetection": "force",
     "allowJs": true,
 
+    "baseUrl": "./src",
+    "paths": {
+      "@tests/*": ["../tests/*"],
+      "@algebra": ["./core/algebra"],
+      "@algebra/*": ["./core/algebra/*"],
+    },
+
     // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -25,6 +32,6 @@
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": true,
     "noPropertyAccessFromIndexSignature": false,
-    "sourceMap": true
-  }
+    "sourceMap": true,
+  },
 }

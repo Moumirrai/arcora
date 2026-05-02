@@ -22,5 +22,6 @@ describe("Element class", () => {
       id: "element-bench-2",
       nodeIDs: [nodeA.id, nodeB.id],
     });
+    const test = element.globalStiffnessMatrix;
   });
 });

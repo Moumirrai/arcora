@@ -63,14 +63,14 @@ describe("Element class", () => {
     });
 
     const k = element.stiffnessMatrix!;
-    expect(k.get([0, 0])).toBeCloseTo(420000000);
-    expect(k.get([0, 3])).toBeCloseTo(-420000000);
-    expect(k.get([1, 1])).toBeCloseTo(167993.28);
-    expect(k.get([1, 2])).toBeCloseTo(419983.2);
-    expect(k.get([2, 2])).toBeCloseTo(1399944);
-    expect(k.get([3, 3])).toBeCloseTo(420000000);
-    expect(k.get([4, 4])).toBeCloseTo(167993.28);
-    expect(k.get([5, 5])).toBeCloseTo(1399944);
+    expect(k.at(0, 0)).toBeCloseTo(420000000);
+    expect(k.at(0, 3)).toBeCloseTo(-420000000);
+    expect(k.at(1, 1)).toBeCloseTo(167993.28);
+    expect(k.at(1, 2)).toBeCloseTo(419983.2);
+    expect(k.at(2, 2)).toBeCloseTo(1399944);
+    expect(k.at(3, 3)).toBeCloseTo(420000000);
+    expect(k.at(4, 4)).toBeCloseTo(167993.28);
+    expect(k.at(5, 5)).toBeCloseTo(1399944);
   });
 
   it("updates cache correctly when updateCache is called after node changes", () => {

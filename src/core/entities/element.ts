@@ -1,5 +1,4 @@
-import { matrix } from "mathjs";
-import { multiply, transpose, type Matrix } from "mathjs";
+import { Matrix } from "@algebra";
 import type { Model } from "../model";
 import type { Node } from "./node";
 
@@ -22,6 +21,7 @@ export class Element {
   #cosine: number = 0;
   #transformMatrix: Matrix | undefined;
   #stiffnessMatrix: Matrix | undefined;
+  #globalStiffnessMatrix: Matrix | undefined;
   #dirty = false;
 
   #nodeA: Node | undefined;
@@ -52,7 +52,7 @@ export class Element {
     const c = this.#cosine;
     const s = this.#sine;
 
-    this.#transformMatrix = matrix([
+    this.#transformMatrix = new Matrix(6, 6, [
       [c, s, 0, 0, 0, 0],
       [-s, c, 0, 0, 0, 0],
       [0, 0, 1, 0, 0, 0],
@@ -61,14 +61,23 @@ export class Element {
       [0, 0, 0, 0, 0, 1],
     ]);
 
-    this.#stiffnessMatrix = this.computeStiffnessMatrix(210e9, 0.01, 8.333e-6); //example values
+    this.#stiffnessMatrix = this.computeLocalStiffnessMatrix(
+      210e9,
+      0.01,
+      8.333e-6
+    ); //example values
+
+    this.#globalStiffnessMatrix = this.#transformMatrix
+      .transpose()
+      .multiply(this.#stiffnessMatrix)
+      .multiply(this.#transformMatrix);
 
     this.#dirty = false;
   }
 
-  private computeStiffnessMatrix(E: number, A: number, I: number): Matrix {
+  private computeLocalStiffnessMatrix(E: number, A: number, I: number): Matrix {
     const L = this.#len;
-    const kLocal = matrix([
+    const kLocal = new Matrix(6, 6, [
       [(A * E) / L, 0, 0, (-A * E) / L, 0, 0],
       [
         0,
@@ -105,10 +114,6 @@ export class Element {
       ],
     ]);
     return kLocal;
-    return multiply(
-      multiply(transpose(this.#transformMatrix!), kLocal),
-      this.#transformMatrix!
-    );
   }
 
   get dirty(): boolean {
@@ -138,5 +143,9 @@ export class Element {
 
   get stiffnessMatrix(): Matrix | undefined {
     return this.#stiffnessMatrix;
+  }
+
+  get globalStiffnessMatrix(): Matrix | undefined {
+    return this.#globalStiffnessMatrix;
   }
 }
