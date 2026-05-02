@@ -1,2 +1,1 @@
-// Main exports for the arcora library
-export { circleArea } from "./example";
+// Main exports for the arcora libraryW

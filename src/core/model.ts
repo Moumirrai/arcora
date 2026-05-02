@@ -15,4 +15,11 @@ export class Model {
       this.nodes.set(id, node);
     }
   }
+
+  public setElements(elements: Map<string, Element>): void {
+    this.elements.clear();
+    for (const [id, element] of elements) {
+      this.elements.set(id, element);
+    }
+  }
 }

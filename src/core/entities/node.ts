@@ -14,7 +14,7 @@ type NodeDataPartial = Partial<NodeData> & { coords: Vec2Plane }; //all optional
 export class Node {
   public readonly id: string;
   public name: string | undefined;
-  
+
   #model: Model;
   #prescribedDisplacement: Displacement | undefined;
   #dirty = false;
@@ -30,6 +30,16 @@ export class Node {
 
   get pos(): Vec2Plane {
     return { x: this.#coords.x, z: this.#coords.z };
+  }
+
+  get prescribedDisplacement(): Displacement | undefined {
+    return this.#prescribedDisplacement;
+  }
+
+  set prescribedDisplacement(value: Displacement | undefined) {
+    this.#prescribedDisplacement = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
   }
 
   set pos(newPos: Vec2Plane) {

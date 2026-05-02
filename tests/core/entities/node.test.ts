@@ -22,7 +22,10 @@ describe("Node class", () => {
   });
 
   it("keeps a provided id", () => {
-    const node = new Node(modelMock, { coords: { x: 0, z: 0 }, id: "custom-id-123" });
+    const node = new Node(modelMock, {
+      coords: { x: 0, z: 0 },
+      id: "custom-id-123",
+    });
     expect(node.id).toBe("custom-id-123");
   });
 
@@ -85,7 +88,7 @@ describe("Node class", () => {
 
     const data = node.toData();
 
-    const node2 = new Node(modelMock,data);
+    const node2 = new Node(modelMock, data);
     expect(node2.id).toBe(node.id);
     expect(node2.pos).toEqual(node.pos);
     expect(node2.name).toBe("Node A");
