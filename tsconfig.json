@@ -7,11 +7,12 @@
     "moduleDetection": "force",
     "allowJs": true,
 
-    "baseUrl": "./src",
     "paths": {
-      "@tests/*": ["../tests/*"],
-      "@algebra": ["./core/algebra"],
-      "@algebra/*": ["./core/algebra/*"],
+      "@tests/*": ["./tests/*"],
+      "@algebra": ["./src/core/algebra"],
+      "@algebra/*": ["./src/core/algebra/*"],
+      "@arcora": ["./src"],
+      "@arcora/*": ["./src/*"],
     },
 
     // Bundler mode
