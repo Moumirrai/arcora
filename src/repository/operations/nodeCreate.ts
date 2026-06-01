@@ -1,62 +1,44 @@
 import type { IOperation } from "../IOperation";
-import type { Node, NodeOptions } from "../../core/entities/node";
+import { Node } from "../../core/entities/node";
 import { v4 as uuidv4 } from "uuid";
+import type { Model } from "@arcora/core/model";
+
+type AddNodeOptions = {
+  x: number;
+  z: number;
+  name?: string;
+};
 
 export class AddNodeOperation implements IOperation {
-  constructor(private opts: NodeOptions) {
-    this.x = x;
-    this.y = y;
-    this.name = name;
+  private id: string;
+  private createdNode?: Node;
+
+  constructor(private opts: AddNodeOptions) {
     this.id = uuidv4();
   }
 
-  do(): boolean {
+  do(model: Model): boolean {
     if (this.createdNode) {
-      const nodeToAdd = this.createdNode;
-      internalStore.update((model) => ({
-        ...model,
-        nodes: [...(model.nodes || []), nodeToAdd],
-      }));
+      model.nodes.set(this.id, this.createdNode);
       return true;
     }
     const assignedName =
-      this.name === undefined ? generateNextNodeName() : this.name;
-    const newNode: Node = {
+      this.opts.name === undefined ? "TODO!!!" : this.opts.name;
+    const newNode = new Node(model, {
       id: this.id,
       name: assignedName,
-      dx: this.x,
-      dy: this.y,
-    };
-
-    internalStore.update((model) => {
-      const nodes = model.nodes || [];
-      return {
-        ...model,
-        nodes: [...nodes, newNode],
-      };
+      coords: { x: this.opts.x, z: this.opts.z },
     });
+
+    model.nodes.set(this.id, newNode);
 
     this.createdNode = newNode;
     return true;
   }
 
-  undo(): boolean {
-    if (this.createdNode) {
-      const nodeIdToRemove = this.createdNode.id;
-      internalStore.update((model) => {
-        const remainingNodes = (model.nodes || []).filter(
-          (n) => n.id !== nodeIdToRemove
-        );
-        const remainingElements = (model.elements || []).filter(
-          (el) =>
-            el.nodeA.id !== nodeIdToRemove && el.nodeB.id !== nodeIdToRemove
-        );
-        return {
-          ...model,
-          nodes: remainingNodes,
-          elements: remainingElements,
-        };
-      });
+  undo(model: Model): boolean {
+    if (this.createdNode && model.nodes.has(this.id)) {
+      model.nodes.delete(this.id);
       return true;
     } else {
       console.warn(

@@ -9,7 +9,7 @@ export interface NodeData {
   prescribedDisplacement?: Displacement;
 }
 
-type NodeDataPartial = Partial<NodeData> & { coords: Vec2Plane }; //all optional except coords
+export type NodeDataPartial = Partial<NodeData> & { coords: Vec2Plane }; //all optional except coords
 
 export class Node {
   public readonly id: string;
@@ -44,7 +44,7 @@ export class Node {
 
   set pos(newPos: Vec2Plane) {
     this.#coords = { x: newPos.x, z: newPos.z };
-    this.#dirty = true;
+    this.#dirty = true; //figure dirty flagging out, this should be set only on node and registered by model
   }
 
   get dirty(): boolean {

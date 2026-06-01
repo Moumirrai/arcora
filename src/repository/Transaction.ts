@@ -1,5 +1,5 @@
 import type { Model } from "../core/model";
-import type { IOperation } from "./operations/IOperation";
+import type { IOperation } from "./IOperation";
 
 export class Transaction {
   private commands: IOperation[] = []; // ordered list of operations
