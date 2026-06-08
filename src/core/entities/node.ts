@@ -1,6 +1,5 @@
 import type { Model } from "../model";
 import type { Displacement, Vec2Plane, Vec2PlaneMutable } from "../types";
-import { v4 as uuidv4 } from "uuid";
 
 export interface NodeData {
   id: string;
@@ -23,7 +22,7 @@ export class Node {
   constructor(model: Model, data: NodeDataPartial) {
     this.#model = model;
     this.#coords = data.coords;
-    this.id = data.id || uuidv4();
+    this.id = data.id || crypto.randomUUID();
     this.#prescribedDisplacement = data.prescribedDisplacement;
     this.name = data.name;
   }

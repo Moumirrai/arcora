@@ -1,6 +1,5 @@
 import type { IOperation } from "../IOperation";
 import { Node } from "../../core/entities/node";
-import { v4 as uuidv4 } from "uuid";
 import type { Model } from "@arcora/core/model";
 
 type AddNodeOptions = {
@@ -14,7 +13,7 @@ export class AddNodeOperation implements IOperation {
   private createdNode?: Node;
 
   constructor(private opts: AddNodeOptions) {
-    this.id = uuidv4();
+    this.id = crypto.randomUUID();
   }
 
   do(model: Model): boolean {
