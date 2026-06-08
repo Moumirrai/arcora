@@ -1,2 +1,2 @@
 // Main exports for the arcora libraryW
-export { Element } from "core/entities/element";
+export { Element } from "@arcora/core/entities/element";

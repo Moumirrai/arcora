@@ -1,6 +1,5 @@
 import type { Model } from "../model";
 import type { Displacement, Vec2Plane, Vec2PlaneMutable } from "../types";
-import { v4 as uuidv4 } from "uuid";
 
 export interface NodeData {
   id: string;
@@ -9,7 +8,7 @@ export interface NodeData {
   prescribedDisplacement?: Displacement;
 }
 
-type NodeDataPartial = Partial<NodeData> & { coords: Vec2Plane }; //all optional except coords
+export type NodeDataPartial = Partial<NodeData> & { coords: Vec2Plane }; //all optional except coords
 
 export class Node {
   public readonly id: string;
@@ -23,7 +22,7 @@ export class Node {
   constructor(model: Model, data: NodeDataPartial) {
     this.#model = model;
     this.#coords = data.coords;
-    this.id = data.id || uuidv4();
+    this.id = data.id || crypto.randomUUID();
     this.#prescribedDisplacement = data.prescribedDisplacement;
     this.name = data.name;
   }
@@ -44,7 +43,7 @@ export class Node {
 
   set pos(newPos: Vec2Plane) {
     this.#coords = { x: newPos.x, z: newPos.z };
-    this.#dirty = true;
+    this.#dirty = true; //figure dirty flagging out, this should be set only on node and registered by model
   }
 
   get dirty(): boolean {

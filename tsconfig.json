@@ -34,5 +34,7 @@
     "exactOptionalPropertyTypes": true,
     "noPropertyAccessFromIndexSignature": false,
     "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
   },
 }
