@@ -10,7 +10,7 @@ import {
   systemSetNnz,
   systemSolve,
   memory,
-} from "wasm";
+} from "@arcora/wasm";
 
 // ── Generator ──────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ function generateBandedSPD(
   bandwidth: number
 ): {
   triplets: Triplet[];
-  mjsMatrix: Matrix;
+  mjsMatrix: math.Matrix;
 } {
   const triplets: Triplet[] = [];
   // Build dense first to accumulate correctly
@@ -51,7 +51,7 @@ function generateBandedSPD(
     }
   }
 
-  const mjsMatrix = math.sparse(dense) as Matrix;
+  const mjsMatrix = math.sparse(dense) as math.Matrix;
 
   return { triplets, mjsMatrix };
 }

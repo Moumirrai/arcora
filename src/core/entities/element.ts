@@ -2,6 +2,49 @@ import { Matrix } from "@algebra";
 import type { Model } from "../model";
 import type { Node } from "./node";
 
+export class ElementsMap extends Map<string, Element> {
+  constructor(private model: Model) {
+    super();
+  }
+
+  override set(key: string, value: Element): this {
+    const old = super.get(key);
+    if (old) {
+      for (const id of old.nodeIDs) {
+        const node = this.model.nodes.get(id);
+        if (node) node.connectedElementIDs.delete(key);
+      }
+    }
+    super.set(key, value);
+    for (const id of value.nodeIDs) {
+      const node = this.model.nodes.get(id);
+      if (node) node.connectedElementIDs.add(key);
+    }
+    return this;
+  }
+
+  override delete(key: string): boolean {
+    const element = super.get(key);
+    if (element) {
+      for (const id of element.nodeIDs) {
+        const node = this.model.nodes.get(id);
+        if (node) node.connectedElementIDs.delete(key);
+      }
+    }
+    return super.delete(key);
+  }
+
+  override clear(): void {
+    for (const [key, el] of this) {
+      for (const id of el.nodeIDs) {
+        const node = this.model.nodes.get(id);
+        if (node) node.connectedElementIDs.delete(key);
+      }
+    }
+    super.clear();
+  }
+}
+
 export interface ElementData {
   nodeIDs: readonly [string, string];
   id: string;
@@ -12,6 +55,7 @@ export type ElementDataPartial = Partial<ElementData> & {
 }; //all optional except nodeIDs
 
 export class Element {
+  public readonly id: string;
   public readonly nodeIDs: readonly [string, string];
 
   #model: Model;
@@ -29,8 +73,13 @@ export class Element {
 
   constructor(model: Model, data: ElementDataPartial) {
     this.#model = model;
+    this.id = data.id ?? crypto.randomUUID();
     this.nodeIDs = data.nodeIDs;
     this.updateCache();
+  }
+
+  toData(): ElementData {
+    return { id: this.id, nodeIDs: this.nodeIDs };
   }
 
   updateCache(): void {

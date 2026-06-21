@@ -14,6 +14,8 @@ export class Node {
   public readonly id: string;
   public name: string | undefined;
 
+  public connectedElementIDs: Set<string> = new Set();
+
   #model: Model;
   #prescribedDisplacement: Displacement | undefined;
   #dirty = false;
@@ -43,7 +45,8 @@ export class Node {
 
   set pos(newPos: Vec2Plane) {
     this.#coords = { x: newPos.x, z: newPos.z };
-    this.#dirty = true; //figure dirty flagging out, this should be set only on node and registered by model
+    this.#dirty = true;
+    this.#model.dirty = true;
   }
 
   get dirty(): boolean {
