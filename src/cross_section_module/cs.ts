@@ -123,6 +123,7 @@ export class Polygon {
     kladne: boolean;
     ro: number;
     E: number;
+    id: string;
 
     vysledky?: {
         smernice: Smernice[];
@@ -134,12 +135,23 @@ export class Polygon {
     }
 
     constructor(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number) {
+        this.id = crypto.randomUUID();
         this.x_val = x_values;
         this.y_val = y_values;
         this.kladne = kladne;
         this.ro = ro;
         this.E = E;
+        this.vypocet();
     }
+    update(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number): void {
+        this.x_val = x_values;
+        this.y_val = y_values;
+        this.kladne = kladne;
+        this.ro = ro;
+        this.E = E;
+        this.vypocet();
+    }
+
     private vypocet(): void {
         if (this.x_val.length < 3) {
             throw new Error("Pro výpočet zadejte alespoň 3 body");
@@ -263,189 +275,32 @@ export class Polygon {
 
 
 export class SpravceTeles {
-    // Odstranili jsme x_values_kladne_all a y_values_kladne_all (vyfiltrují se až při finálním výpočtu)
-    x_values_all: number[][] = [];
-    y_values_all: number[][] = [];
-    a_values_all: Smernice[][] = [];
-    vsechny_pruseciky: Bod[] = [];
-
-    vsechny_plochy: number[] = [];
-    vsechny_teziste: Bod[] = [];
-    vsechny_momenty_setrvacnosti: [number, number][] = [];
-    vsechny_dev_momenty: number[] = [];
-    vsechny_hmotnosti: number[] = [];
-    ro_all: number[] = [];
-    E_all: number[] = [];
+    polygony: Polygon[] = [];
+    plocha: number = 0;
+    pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
-
-    // Přidán nepovinný parametr `index` na konec funkce
-    zpracujPolygon(aktualni_x: number[], aktualni_y: number[], znamenko: "+" | "-", ro: number, E: number, index?: number): void {
-        if (aktualni_x.length < 3) {
-            throw new Error("Pro výpočet zadejte alespoň 3 body");
-        }
-
-        const x_val: number[] = [...aktualni_x, aktualni_x[0]!];
-        const y_val: number[] = [...aktualni_y, aktualni_y[0]!];
-
-        // --- VÝPOČET SMĚRNIC (a, b) ---
-        const smernice_polygonu: Smernice[] = [];
-        const eps = 1e-9;
-
-        for (let i = 0; i < x_val.length - 1; i++) {
-            const x1 = x_val[i]!;
-            const y1 = y_val[i]!;
-            const x2 = x_val[i + 1]!;
-            const y2 = y_val[i + 1]!;
-
-            if (Math.abs(x1 - x2) < eps) {
-                smernice_polygonu.push({ typ: "svisla", x: x1 });
-            } else {
-                const a = (y1 - y2) / (x1 - x2);
-                const b = y1 - a * x1;
-                smernice_polygonu.push({ typ: "klasicka", a: a, b: b });
-            }
-        }
-
-        // --- POČÁTEK SOUŘADNÉHO SYSTÉMU S PŘEPOČTEM ---
-        const pocatek_x = Math.min(...x_val);
-        const pocatek_y = Math.min(...y_val);
-
-        const x_val_n = x_val.map(x => x - pocatek_x);
-        const y_val_n = y_val.map(y => y - pocatek_y);
-
-        // --- PLOCHA A TĚŽIŠTĚ POD VEKTORY ---
-        let suma_plochy_kladne = 0, suma_plochy_zaporne = 0;
-        let suma_moment_plochy_x_kladne = 0, suma_moment_plochy_x_zaporne = 0;
-        let suma_moment_plochy_y_kladne = 0, suma_moment_plochy_y_zaporne = 0;
-
-        for (let i = 0; i < x_val_n.length - 1; i++) {
-            const x1 = x_val_n[i]!;
-            const x2 = x_val_n[i + 1]!;
-            const y1 = y_val_n[i]!;
-            const y2 = y_val_n[i + 1]!;
-
-            const plocha = plochaPodVektorem(x1, x2, y1, y2);
-            const [Xt, Yt] = tezistePlochyPodVektorem(x1, x2, y1, y2);
-
-            if (x2 - x1 > 0) {
-                suma_plochy_kladne += plocha;
-                suma_moment_plochy_x_kladne += plocha * Xt;
-                suma_moment_plochy_y_kladne += plocha * Yt;
-            } else {
-                suma_plochy_zaporne += plocha;
-                suma_moment_plochy_x_zaporne += plocha * Xt;
-                suma_moment_plochy_y_zaporne += plocha * Yt;
-            }
-        }
-
-        const plocha_a_smer = suma_plochy_kladne - suma_plochy_zaporne;
-        const plocha_abs = Math.abs(plocha_a_smer);
-
-        // --- SUMA TĚŽIŠŤ ---
-        let XT = 0, YT = 0;
-        if (plocha_abs > 0) {
-            if (plocha_a_smer > 0) {
-                XT = (suma_moment_plochy_x_kladne - suma_moment_plochy_x_zaporne) / plocha_abs;
-                YT = (suma_moment_plochy_y_kladne - suma_moment_plochy_y_zaporne) / plocha_abs;
-            } else {
-                XT = (-suma_moment_plochy_x_kladne + suma_moment_plochy_x_zaporne) / plocha_abs;
-                YT = (-suma_moment_plochy_y_kladne + suma_moment_plochy_y_zaporne) / plocha_abs;
-            }
-        }
-
-        const teziste_vysledne: Bod = { x: XT + pocatek_x, y: YT + pocatek_y };
-
-        // --- MOMENTY SETRVAČNOSTI A DEVIAČNÍ MOMENT ---
-        let Ix_kladne = 0, Ix_zaporne = 0;
-        let Iy_kladne = 0, Iy_zaporne = 0;
-        let Dxy_kladne = 0, Dxy_zaporne = 0;
-
-        for (let i = 0; i < x_val_n.length - 1; i++) {
-            const x1 = x_val_n[i]!;
-            const x2 = x_val_n[i + 1]!;
-            const y1 = y_val_n[i]!;
-            const y2 = y_val_n[i + 1]!;
-
-            const [Ix, Iy] = momentySetrvacnostiPodVektorem(x1, x2, y1, y2, XT, YT);
-            const Dxy = deviacniMomentPodVektorem(x1, x2, y1, y2, XT, YT);
-
-            if (x2 - x1 > 0) {
-                Ix_kladne += Ix; Iy_kladne += Iy; Dxy_kladne += Dxy;
-            } else {
-                Ix_zaporne += Ix; Iy_zaporne += Iy; Dxy_zaporne += Dxy;
-            }
-        }
-
-        const vysledny_Ix = Math.abs(Ix_kladne - Ix_zaporne);
-        const vysledny_Iy = Math.abs(Iy_kladne - Iy_zaporne);
-        let deviacni_moment = Dxy_kladne - Dxy_zaporne;
-        if (plocha_a_smer < 0) deviacni_moment = -deviacni_moment;
-
-        // --- HMOTNOST ---
-        const hmotnost_1bm = ro * plocha_abs * 1e-6;
-        const nasobitel = znamenko === "-" ? -1 : 1;
-
-        // --- ULOŽENÍ NEBO AKTUALIZACE DO GLOBÁLNÍ PAMĚTI ---
-        if (index !== undefined && index >= 0 && index < this.x_values_all.length) {
-            // Přepsání existujícího polygonu (pro real-time úpravy bodů)
-            this.x_values_all[index] = x_val;
-            this.y_values_all[index] = y_val;
-            this.a_values_all[index] = smernice_polygonu;
-            this.vsechny_plochy[index] = plocha_abs * nasobitel;
-            this.vsechny_momenty_setrvacnosti[index] = [vysledny_Ix * nasobitel, vysledny_Iy * nasobitel];
-            this.vsechny_dev_momenty[index] = deviacni_moment * nasobitel;
-            this.vsechny_hmotnosti[index] = hmotnost_1bm * nasobitel;
-            this.vsechny_teziste[index] = teziste_vysledne;
-            this.ro_all[index] = ro;
-            this.E_all[index] = E;
-        } else {
-            // Přidání úplně nového polygonu na konec seznamu
-            this.x_values_all.push(x_val);
-            this.y_values_all.push(y_val);
-            this.a_values_all.push(smernice_polygonu);
-            this.vsechny_plochy.push(plocha_abs * nasobitel);
-            this.vsechny_momenty_setrvacnosti.push([vysledny_Ix * nasobitel, vysledny_Iy * nasobitel]);
-            this.vsechny_dev_momenty.push(deviacni_moment * nasobitel);
-            this.vsechny_hmotnosti.push(hmotnost_1bm * nasobitel);
-            this.vsechny_teziste.push(teziste_vysledne);
-            this.ro_all.push(ro);
-            this.E_all.push(E);
-        }
-
-        this.aktualizujPruseciky();
-    }
-
-    // 2. TADY JE MÍSTO PRO NOVOU FUNKCI SMAZÁNÍ
-    smazPolygon(index: number): void {
-        // Kontrola, zda index vůbec v poli existuje, abychom nesmazali něco mimo rozsah
-        if (index >= 0 && index < this.x_values_all.length) {
-            // Metoda .splice(index, 1) smaže 1 prvek na dané pozici a zbytek pole posune
-            this.x_values_all.splice(index, 1);
-            this.y_values_all.splice(index, 1);
-            this.a_values_all.splice(index, 1);
-            this.vsechny_plochy.splice(index, 1);
-            this.vsechny_momenty_setrvacnosti.splice(index, 1);
-            this.vsechny_dev_momenty.splice(index, 1);
-            this.vsechny_hmotnosti.splice(index, 1);
-            this.vsechny_teziste.splice(index, 1);
-            this.ro_all.splice(index, 1);
-            this.E_all.splice(index, 1);
-            this.aktualizujPruseciky();
-        }
-    }
 
     // Vypočet průsečíků všech přímek ze všech polygonů navzájem
     aktualizujPruseciky(): void {
         // Nejdříve vyprázdníme staré průsečíky
-        this.vsechny_pruseciky = [];
+        this.pruseciky = [];
 
         // Procházíme všechny polygony proti sobě (bez duplicit a porovnávání se sebou samým)
-        for (let i = 0; i < this.a_values_all.length; i++) {
-            for (let j = i + 1; j < this.a_values_all.length; j++) {
+        for (let i = 0; i < this.polygony.length; i++) {
+            for (let j = i + 1; j < this.polygony.length; j++) {
 
-                // Přidán vykřičník pro bezpečnost v TypeScriptu
-                const smernice_poly1 = this.a_values_all[i]!;
-                const smernice_poly2 = this.a_values_all[j]!;
+                const poly1 = this.polygony[i]!;
+                const poly2 = this.polygony[j]!;
+
+                // Bezpečnostní pojistka v TypeScriptu: 
+                // Kdyby náhodou polygon neměl spočítané výsledky, přeskočíme ho
+                if (!poly1.vysledky || !poly2.vysledky) {
+                    continue;
+                }
+
+                // Vytáhneme si směrnice přímo z konkrétních polygonů
+                const smernice_poly1 = poly1.vysledky.smernice;
+                const smernice_poly2 = poly2.vysledky.smernice;
 
                 // Procházíme všechny hrany prvního polygonu proti všem hranám druhého
                 for (let k = 0; k < smernice_poly1.length; k++) {
@@ -462,13 +317,13 @@ export class SpravceTeles {
                             // První je svislá (má fixní X), druhá je klasická (y = ax + b)
                             const x = s1.x;
                             const y = s2.a * x + s2.b;
-                            this.vsechny_pruseciky.push({ x, y });
+                            this.pruseciky.push({ x, y });
                         }
                         else if (s1.typ === "klasicka" && s2.typ === "svisla") {
                             // První je klasická, druhá je svislá
                             const x = s2.x;
                             const y = s1.a * x + s1.b;
-                            this.vsechny_pruseciky.push({ x, y });
+                            this.pruseciky.push({ x, y });
                         }
                         else if (s1.typ === "klasicka" && s2.typ === "klasicka") {
                             // Obě jsou klasické (y = ax + b)
@@ -479,7 +334,7 @@ export class SpravceTeles {
                             // Výpočet průsečíku
                             const x = (s2.b - s1.b) / (s1.a - s2.a);
                             const y = s1.a * x + s1.b;
-                            this.vsechny_pruseciky.push({ x, y });
+                            this.pruseciky.push({ x, y });
                         }
                     }
                 }
@@ -487,53 +342,53 @@ export class SpravceTeles {
         }
     }
 
-    spocitejCelkove(): CelkoveCharakteristiky {
-        if (this.vsechny_plochy.length === 0) {
-            throw new Error("Nejdříve zadejte alespoň jeden polygon.");
+spocitejCelkove(): CelkoveCharakteristiky {
+        // Vyfiltrujeme pouze polygony, které mají úspěšně spočítané výsledky
+        const validniPolygony = this.polygony.filter(p => p.vysledky !== undefined);
+
+        if (validniPolygony.length === 0) {
+            throw new Error("Nejdříve zadejte alespoň jeden platný polygon.");
         }
 
         // --- 1. CELKOVÁ PLOCHA A HMOTNOST ---
-        const vysledna_plocha = this.vsechny_plochy.reduce((suma, plocha) => suma + plocha, 0);
-        const celkova_hmotnost = this.vsechny_hmotnosti.reduce((suma, m) => suma + m, 0);
+        const vysledna_plocha = validniPolygony.reduce((suma, poly) => suma + poly.vysledky!.plocha, 0);
+        const celkova_hmotnost = validniPolygony.reduce((suma, poly) => suma + poly.vysledky!.hmotnost, 0);
 
         // --- 2. REFERENČNÍ MATERIÁL (E_ref) ---
-        const E_ref = this.zvolene_E_ref !== undefined ? this.zvolene_E_ref : Math.max(...this.E_all);
+        // Vezmeme buď zadané E_ref, nebo najdeme maximální E ze zadaných polygonů
+        const E_ref = this.zvolene_E_ref !== undefined 
+            ? this.zvolene_E_ref 
+            : Math.max(...validniPolygony.map(p => p.E));
 
         // --- 3. CELKOVÉ E TĚŽIŠTĚ ---
         let jmenovatel_E = 0;
-        for (let i = 0; i < this.vsechny_plochy.length; i++) {
-            jmenovatel_E += this.E_all[i]! * this.vsechny_plochy[i]!;
+        let citatel_x = 0;
+        let citatel_y = 0;
+
+        for (const poly of validniPolygony) {
+            const E_A = poly.E * poly.vysledky!.plocha;
+            jmenovatel_E += E_A;
+            citatel_x += E_A * poly.vysledky!.teziste.x;
+            citatel_y += E_A * poly.vysledky!.teziste.y;
         }
 
-        let vysledne_Eteziste_x = 0;
-        let vysledne_Eteziste_y = 0;
-
-        if (jmenovatel_E !== 0) {
-            let citatel_x = 0, citatel_y = 0;
-            for (let i = 0; i < this.vsechny_plochy.length; i++) {
-                const E_A = this.E_all[i]! * this.vsechny_plochy[i]!;
-                citatel_x += E_A * this.vsechny_teziste[i]!.x;
-                citatel_y += E_A * this.vsechny_teziste[i]!.y;
-            }
-            vysledne_Eteziste_x = citatel_x / jmenovatel_E;
-            vysledne_Eteziste_y = citatel_y / jmenovatel_E;
-        }
+        const vysledne_Eteziste_x = jmenovatel_E !== 0 ? citatel_x / jmenovatel_E : 0;
+        const vysledne_Eteziste_y = jmenovatel_E !== 0 ? citatel_y / jmenovatel_E : 0;
 
         // --- 4. STEINEROVA VĚTA: MOMENTY A DEVIAČNÍ MOMENT ---
         let vysledny_moment_x = 0;
         let vysledny_moment_y = 0;
         let vysledny_dev_moment = 0;
 
-        for (let i = 0; i < this.vsechny_plochy.length; i++) {
-            const A = this.vsechny_plochy[i]!;
-            const E_i = this.E_all[i]!;
-            const pomerni_E = E_i / E_ref;
-            const [I_x, I_y] = this.vsechny_momenty_setrvacnosti[i]!;
-            const D_xy = this.vsechny_dev_momenty[i]!;
-            const t_x = this.vsechny_teziste[i]!.x;
-            const t_y = this.vsechny_teziste[i]!.y;
+        for (const poly of validniPolygony) {
+            const A = poly.vysledky!.plocha;
+            const pomerni_E = poly.E / E_ref;
+            const [I_x, I_y] = poly.vysledky!.moment_setrvacnosti;
+            const D_xy = poly.vysledky!.deviacni_moment;
+            const t_x = poly.vysledky!.teziste.x;
+            const t_y = poly.vysledky!.teziste.y;
 
-            // Posun na ose X a Y k těžišti
+            // Posun na ose X a Y k celkovému E-těžišti
             const dx = t_x - vysledne_Eteziste_x;
             const dy = t_y - vysledne_Eteziste_y;
 
@@ -551,28 +406,25 @@ export class SpravceTeles {
         // --- 6. HLAVNÍ MOMENTY SETRVAČNOSTI ---
         const moment_prumer = 0.5 * (vysledny_moment_x + vysledny_moment_y);
         const moment_rozdil = 0.5 * Math.sqrt(Math.pow(vysledny_moment_x - vysledny_moment_y, 2) + 4 * Math.pow(vysledny_dev_moment, 2));
-
+        
         const vysledny_moment_max = moment_prumer + moment_rozdil;
         const vysledny_moment_min = moment_prumer - moment_rozdil;
 
         // --- 7. EXTRÉMNÍ SOUŘADNICE KLADNÝCH POLYGONŮ ---
-        // Vytáhneme pouze body z polygonů s kladnou plochou (bez děr)
+        // Vytáhneme pouze body z polygonů s kladným znaménkem (značí vnější hrany průřezu, bez děr)
         let max_x_kladne = -Infinity, min_x_kladne = Infinity;
         let max_y_kladne = -Infinity, min_y_kladne = Infinity;
+        
+        const u_values_kladne: number[] = [];
+        const v_values_kladne: number[] = [];
 
-        let u_values_kladne: number[] = [];
-        let v_values_kladne: number[] = [];
+        for (const poly of validniPolygony) {
+            if (poly.kladne) {
+                for (let j = 0; j < poly.x_val.length; j++) {
+                    const x = poly.x_val[j]!;
+                    const y = poly.y_val[j]!;
 
-        for (let i = 0; i < this.x_values_all.length; i++) {
-            if (this.vsechny_plochy[i]! > 0) {
-                const poly_x = this.x_values_all[i]!;
-                const poly_y = this.y_values_all[i]!;
-
-                for (let j = 0; j < poly_x.length; j++) {
-                    const x = poly_x[j]!;
-                    const y = poly_y[j]!;
-
-                    // Klasické extrémy
+                    // Klasické extrémy (Bounding box)
                     if (x > max_x_kladne) max_x_kladne = x;
                     if (x < min_x_kladne) min_x_kladne = x;
                     if (y > max_y_kladne) max_y_kladne = y;
@@ -581,10 +433,10 @@ export class SpravceTeles {
                     // Pootočené extrémy k hlavní ose (rotace k lokálnímu těžišti)
                     const dx = x - vysledne_Eteziste_x;
                     const dy = y - vysledne_Eteziste_y;
-
+                    
                     const u = dx * Math.cos(-alfa_rad) + dy * Math.sin(-alfa_rad);
                     const v = -dx * Math.sin(-alfa_rad) + dy * Math.cos(-alfa_rad);
-
+                    
                     u_values_kladne.push(u);
                     v_values_kladne.push(v);
                 }
@@ -610,8 +462,8 @@ export class SpravceTeles {
 
         // --- 10. POLOMĚRY SETRVAČNOSTI ---
         let AE_souveti = 0;
-        for (let i = 0; i < this.vsechny_plochy.length; i++) {
-            AE_souveti += this.vsechny_plochy[i]! * (this.E_all[i]! / E_ref);
+        for (const poly of validniPolygony) {
+            AE_souveti += poly.vysledky!.plocha * (poly.E / E_ref);
         }
         AE_souveti = AE_souveti || 1e-9; // Pojistka proti dělení nulou
 
@@ -624,7 +476,6 @@ export class SpravceTeles {
         const celkova_vyska_h = Math.abs(max_y_kladne - min_y_kladne);
         const celkova_sirka_b = Math.abs(max_x_kladne - min_x_kladne);
 
-        // Návrat celého rozhraní jako jednoho úhledného balíčku pro UI
         return {
             vysledna_plocha,
             celkova_hmotnost,
