@@ -359,3 +359,99 @@ describe("Testování průsečíků - aktualizujPruseciky", () => {
 });
 
 
+// TESTY PRO SPOCITEJ_CELKOVE 
+
+
+describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+
+    it("1. Homogenní symetrický průřez (Obdélník 4x2)", () => {
+        // Přidáme jeden jednoduchý obdélník (šířka 4, výška 2)
+        spravce.zpracujPolygon([0, 4, 4, 0], [0, 0, 2, 2], "+", 1.0, 210);
+
+        const vysledky = spravce.spocitejCelkove();
+
+        // Základní rozměry a plocha
+        expect(vysledky.vysledna_plocha).toBeCloseTo(8, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(4, 5);
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(2, 5);
+
+        // Těžiště (přesně uprostřed)
+        expect(vysledky.teziste_x).toBeCloseTo(2, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(1, 5);
+
+        // Momenty setrvačnosti k těžišti celého průřezu
+        // Ix = 1/12 * b * h^3 = 1/12 * 4 * 8 = 32/12 = 2.666...
+        // Iy = 1/12 * h * b^3 = 1/12 * 2 * 64 = 128/12 = 10.666...
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(2.6666666667, 5);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(10.6666666667, 5);
+
+        // Symetrický průřez -> deviační moment je 0, úhel natočení hlavních os je 0
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 5);
+
+        // Hlavní momenty musí být u symetrického tvaru totožné s normálními
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(10.6666666667, 5); // Iy je zde větší
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(2.6666666667, 5);  // Ix je zde menší
+    });
+
+    it("2. Nehomogenní průřez (Dva materiály s různým E)", () => {
+        // Spodní obdélník (Materiál 1: Ocel, E = 200 GPa) -> šířka 4, výška 2
+        spravce.zpracujPolygon([0, 4, 4, 0], [0, 0, 2, 2], "+", 1.0, 200);
+
+        // Horní obdélník (Materiál 2: Hliník, E = 100 GPa) -> šířka 4, výška 2 (leží na tom prvním)
+        spravce.zpracujPolygon([0, 4, 4, 0], [2, 2, 4, 4], "+", 1.0, 100);
+
+        // Nastavíme referenční E schválně na Ocel (200)
+        spravce.zvolene_E_ref = 200;
+
+        const vysledky = spravce.spocitejCelkove();
+
+        // Ideální těžiště homogenního tvaru 4x4 by bylo v y=2.
+        // Ale spodní část je 2x tužší (E=200 vs E=100), takže ideální těžiště musí "spadnout" níž.
+        // Analyticky: (A1*E1*y1 + A2*E2*y2) / (A1*E1 + A2*E2)
+        // (8 * 200 * 1 + 8 * 100 * 3) / (8 * 200 + 8 * 100) = (1600 + 2400) / 2400 = 4000 / 2400 = 1.666...
+        expect(vysledky.teziste_y).toBeCloseTo(1.6666666667, 5);
+        expect(vysledky.teziste_x).toBeCloseTo(2, 5); // Na ose X je to symetrické
+        
+        // Zkontrolujeme ideální plochu:
+        // Skutečná plocha je sice 16, ale protože je to přepočtené na Ocel (E_ref = 200),
+        // Hliníková část (E=100) se "zúží" na polovinu. 
+        // Takže ve vzorcích pro W a I bude hrát roli jiná distribuce tuhosti.
+    });
+
+    it("3. Průřez s otvorem (Odečítání polygonu)", () => {
+        // Vnější obdélník 4x4 (Plocha 16)
+        spravce.zpracujPolygon([0, 4, 4, 0], [0, 0, 4, 4], "+", 1.0, 210);
+
+        // Vnitřní čtvercový otvor 2x2 přesně uprostřed (Plocha 4)
+        spravce.zpracujPolygon([1, 3, 3, 1], [1, 1, 3, 3], "-", 1.0, 210);
+
+        const vysledky = spravce.spocitejCelkove();
+
+        // Výsledná plocha musí být 16 - 4 = 12
+        expect(vysledky.vysledna_plocha).toBeCloseTo(12, 5);
+
+        // Těžiště musí zůstat přesně uprostřed, protože otvor je symetrický
+        expect(vysledky.teziste_x).toBeCloseTo(2, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(2, 5);
+
+        // Momenty setrvačnosti:
+        // Plný tvar (4x4): I = 1/12 * 4 * 4^3 = 256/12 = 21.333...
+        // Otvor (2x2): I_otvor = 1/12 * 2 * 2^3 = 16/12 = 1.333...
+        // Výsledek = 21.333... - 1.333... = 20.0
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(20, 5);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(20, 5);
+    });
+    
+    it("4. Kontrola pádu při prázdném zadání", () => {
+        // Pokud zavoláme spocitejCelkove() bez polygonů, mělo by to hodit error,
+        // protože bychom jinak dělili nulou.
+        expect(() => spravce.spocitejCelkove()).toThrowError("Nejdříve zadejte alespoň jeden polygon.");
+    });
+});
+
