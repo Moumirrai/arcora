@@ -259,6 +259,14 @@ describe("Testování průsečíků - aktualizujPruseciky", () => {
     });
 });
 
+
+
+
+// --------------------------- PRŮŘEZY ------------------------------
+
+
+
+
 describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     let spravce: SpravceTeles;
 
@@ -271,44 +279,97 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
         spravce.polygony.push(p1);
         const vysledky = spravce.spocitejCelkove();
 
-        expect(vysledky.vysledna_plocha).toBeCloseTo(8, 5);
-        expect(vysledky.celkova_sirka_b).toBeCloseTo(4, 5);
         expect(vysledky.celkova_vyska_h).toBeCloseTo(2, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(4, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(8, 5);
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(0, 2);
         expect(vysledky.teziste_x).toBeCloseTo(2, 5);
         expect(vysledky.teziste_y).toBeCloseTo(1, 5);
         expect(vysledky.vysledny_moment_x).toBeCloseTo(2.6666666667, 5);
         expect(vysledky.vysledny_moment_y).toBeCloseTo(10.6666666667, 5);
         expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
-        // Hodnota alfa_deg se pro plně symetrické průřezy v atan2 vyhodnocuje často jako 0, nechávám 0 nebo blízko nule dle matematiky 
-        // (tvůj předchozí test měl 90, zkontroluj si v logice zda atan2(0, 0) vrací 0)
+        expect(vysledky.i_x).toBeCloseTo(0.58, 2);
+        expect(vysledky.i_y).toBeCloseTo(1.15, 2);
+        expect(vysledky.W_x_h).toBeCloseTo(2.67, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(2.67, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(5.33, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(5.33, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 5);
         expect(vysledky.vysledny_moment_max).toBeCloseTo(10.6666666667, 5); 
-        expect(vysledky.vysledny_moment_min).toBeCloseTo(2.6666666667, 5);  
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(2.6666666667, 5);
+        expect(vysledky.i_max).toBeCloseTo(1.15, 2);
+        expect(vysledky.i_min).toBeCloseTo(0.58, 2);
+        expect(vysledky.W_max_h).toBeCloseTo(5.33, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(5.33, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(2.67, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(2.67, 2);  
     });
 
     it("2. Nehomogenní průřez (Dva materiály s různým E)", () => {
-        const p1 = new Polygon([0, 4, 4, 0], [0, 0, 2, 2], true, 1.0, 200);
-        const p2 = new Polygon([0, 4, 4, 0], [2, 2, 4, 4], true, 1.0, 100);
+        const p1 = new Polygon([0, 40, 40, 0], [0, 0, 20, 20], true, 7850, 210);
+        const p2 = new Polygon([0, 40, 40, 0], [20, 20, 40, 40], true, 2800, 50);
         spravce.polygony.push(p1, p2);
 
-        spravce.zvolene_E_ref = 200;
+        spravce.zvolene_E_ref = 210;
         const vysledky = spravce.spocitejCelkove();
 
-        expect(vysledky.teziste_y).toBeCloseTo(1.6666666667, 5);
-        expect(vysledky.teziste_x).toBeCloseTo(2, 5); 
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(40, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(40, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(1600, 5);
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(8.52, 2);
+        expect(vysledky.teziste_x).toBeCloseTo(20, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(13.85, 2);
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(94554.33, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(132063.49, 2);
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+        expect(vysledky.i_x).toBeCloseTo(9.77, 2);
+        expect(vysledky.i_y).toBeCloseTo(11.55, 2);
+        expect(vysledky.W_x_h).toBeCloseTo(3615.31, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(6828.92, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(6603.17, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(6603.17, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 5);
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(132063.49, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(94554.33, 2);
+        expect(vysledky.i_max).toBeCloseTo(11.55, 2);
+        expect(vysledky.i_min).toBeCloseTo(9.77, 2);
+        expect(vysledky.W_max_h).toBeCloseTo(6603.17, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(6603.17, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(6828.92, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(3615.31, 2);  
     });
 
     it("3. Průřez s otvorem (Odečítání polygonu)", () => {
-        const p1 = new Polygon([0, 4, 4, 0], [0, 0, 4, 4], true, 1.0, 210);
-        const p2 = new Polygon([1, 3, 3, 1], [1, 1, 3, 3], false, 1.0, 210);
+        const p1 = new Polygon([0, 40, 40, 0], [0, 0, 40, 40], true, 1.0, 210);
+        const p2 = new Polygon([10, 30, 30, 10], [10, 10, 30, 30], false, 1.0, 210);
         spravce.polygony.push(p1, p2);
 
         const vysledky = spravce.spocitejCelkove();
 
-        expect(vysledky.vysledna_plocha).toBeCloseTo(12, 5);
-        expect(vysledky.teziste_x).toBeCloseTo(2, 5);
-        expect(vysledky.teziste_y).toBeCloseTo(2, 5);
-        expect(vysledky.vysledny_moment_x).toBeCloseTo(20, 5);
-        expect(vysledky.vysledny_moment_y).toBeCloseTo(20, 5);
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(40, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(40, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(1200, 5);
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(0, 2);
+        expect(vysledky.teziste_x).toBeCloseTo(20, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(20, 5);
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(200000, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(200000, 2);
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+        expect(vysledky.i_x).toBeCloseTo(12.91, 2);
+        expect(vysledky.i_y).toBeCloseTo(12.91, 2);
+        expect(vysledky.W_x_h).toBeCloseTo(10000, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(10000, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(10000, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(10000, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 5);
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(200000, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(200000, 2);
+        expect(vysledky.i_max).toBeCloseTo(12.91, 2);
+        expect(vysledky.i_min).toBeCloseTo(12.91, 2);
+        expect(vysledky.W_max_h).toBeCloseTo(10000, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(10000, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(10000, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(10000, 2);  
     });
     
     it("4. Kontrola pádu při prázdném zadání", () => {
@@ -316,4 +377,7 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     });
 });
 
+
+
+// zkusit random průřezy napříč kvadrantama a zadavaný proti směru hodinových ručiček (u toho checknout deviační moment)
 
