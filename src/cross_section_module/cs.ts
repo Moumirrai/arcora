@@ -79,8 +79,6 @@ export function deviacniMomentPodVektorem(x1: number, x2: number, y1: number, y2
 
 //PLOCHA.PY
 
-
-// 1. Definice typů pro maximální bezpečnost kódu
 export type Smernice = 
     | { typ: "klasicka"; a: number; b: number }
     | { typ: "svisla"; x: number };
@@ -90,15 +88,12 @@ export interface Bod {
     y: number;
 }
 
-// 2. Třída, která nahrazuje výpočetní paměť původního MainWindow
 export class SpravceTeles {
-    // Globální paměť (ekvivalent tvých self.vsechny_plochy atd.)
+    // Odstranili jsme x_values_kladne_all a y_values_kladne_all (vyfiltrují se až při finálním výpočtu)
     x_values_all: number[][] = [];
     y_values_all: number[][] = [];
-    x_values_kladne_all: number[][] = [];
-    y_values_kladne_all: number[][] = [];
-    
     a_values_all: Smernice[][] = [];
+    vsechny_pruseciky: Bod[] = [];
     
     vsechny_plochy: number[] = [];
     vsechny_teziste: Bod[] = [];
@@ -108,31 +103,20 @@ export class SpravceTeles {
     ro_all: number[] = [];
     E_all: number[] = [];
 
-    // Hlavní funkce z PLOCHA.PY
-    zpracujPolygon(aktualni_x: number[], aktualni_y: number[], znamenko: "+" | "-", ro: number, E: number): void {
+    // Přidán nepovinný parametr `index` na konec funkce
+    zpracujPolygon(aktualni_x: number[], aktualni_y: number[], znamenko: "+" | "-", ro: number, E: number, index?: number): void {
         if (aktualni_x.length < 3) {
             throw new Error("Pro výpočet zadejte alespoň 3 body");
         }
 
-        // OPRAVA 1: Přidání vykřičníku (!) říká TypeScriptu, že aktualni_x[0] určitě existuje.
-        // Zároveň explicitně říkáme, že x_val a y_val jsou pole čísel (number[]).
         const x_val: number[] = [...aktualni_x, aktualni_x[0]!];
         const y_val: number[] = [...aktualni_y, aktualni_y[0]!];
-
-        this.x_values_all.push(x_val);
-        this.y_values_all.push(y_val);
-
-        if (znamenko === "+") {
-            this.x_values_kladne_all.push(x_val);
-            this.y_values_kladne_all.push(y_val);
-        }
 
         // --- VÝPOČET SMĚRNIC (a, b) ---
         const smernice_polygonu: Smernice[] = [];
         const eps = 1e-9;
 
         for (let i = 0; i < x_val.length - 1; i++) {
-            // OPRAVA 2: Zde také přidáme vykřičník, abychom zaručili, že index v poli není undefined.
             const x1 = x_val[i]!;
             const y1 = y_val[i]!;
             const x2 = x_val[i + 1]!;
@@ -146,7 +130,6 @@ export class SpravceTeles {
                 smernice_polygonu.push({ typ: "klasicka", a: a, b: b });
             }
         }
-        this.a_values_all.push(smernice_polygonu);
 
         // --- POČÁTEK SOUŘADNÉHO SYSTÉMU S PŘEPOČTEM ---
         const pocatek_x = Math.min(...x_val);
@@ -161,7 +144,6 @@ export class SpravceTeles {
         let suma_moment_plochy_y_kladne = 0, suma_moment_plochy_y_zaporne = 0;
 
         for (let i = 0; i < x_val_n.length - 1; i++) {
-            // OPRAVA 3: I zde použijeme vykřičníky pro iteraci
             const x1 = x_val_n[i]!;
             const x2 = x_val_n[i + 1]!;
             const y1 = y_val_n[i]!;
@@ -204,7 +186,6 @@ export class SpravceTeles {
         let Dxy_kladne = 0, Dxy_zaporne = 0;
 
         for (let i = 0; i < x_val_n.length - 1; i++) {
-            // OPRAVA 4: Stejný princip pro finální počítání momentů
             const x1 = x_val_n[i]!;
             const x2 = x_val_n[i + 1]!;
             const y1 = y_val_n[i]!;
@@ -227,18 +208,108 @@ export class SpravceTeles {
 
         // --- HMOTNOST ---
         const hmotnost_1bm = ro * plocha_abs * 1e-6;
-
-        // --- ULOŽENÍ DO GLOBÁLNÍ PAMĚTI ---
         const nasobitel = znamenko === "-" ? -1 : 1;
 
-        this.vsechny_plochy.push(plocha_abs * nasobitel);
-        this.vsechny_momenty_setrvacnosti.push([vysledny_Ix * nasobitel, vysledny_Iy * nasobitel]);
-        this.vsechny_dev_momenty.push(deviacni_moment * nasobitel);
-        this.vsechny_hmotnosti.push(hmotnost_1bm * nasobitel);
-        
-        this.vsechny_teziste.push(teziste_vysledne);
-        this.ro_all.push(ro);
-        this.E_all.push(E);
+        // --- ULOŽENÍ NEBO AKTUALIZACE DO GLOBÁLNÍ PAMĚTI ---
+        if (index !== undefined && index >= 0 && index < this.x_values_all.length) {
+            // Přepsání existujícího polygonu (pro real-time úpravy bodů)
+            this.x_values_all[index] = x_val;
+            this.y_values_all[index] = y_val;
+            this.a_values_all[index] = smernice_polygonu;
+            this.vsechny_plochy[index] = plocha_abs * nasobitel;
+            this.vsechny_momenty_setrvacnosti[index] = [vysledny_Ix * nasobitel, vysledny_Iy * nasobitel];
+            this.vsechny_dev_momenty[index] = deviacni_moment * nasobitel;
+            this.vsechny_hmotnosti[index] = hmotnost_1bm * nasobitel;
+            this.vsechny_teziste[index] = teziste_vysledne;
+            this.ro_all[index] = ro;
+            this.E_all[index] = E;
+        } else {
+            // Přidání úplně nového polygonu na konec seznamu
+            this.x_values_all.push(x_val);
+            this.y_values_all.push(y_val);
+            this.a_values_all.push(smernice_polygonu);
+            this.vsechny_plochy.push(plocha_abs * nasobitel);
+            this.vsechny_momenty_setrvacnosti.push([vysledny_Ix * nasobitel, vysledny_Iy * nasobitel]);
+            this.vsechny_dev_momenty.push(deviacni_moment * nasobitel);
+            this.vsechny_hmotnosti.push(hmotnost_1bm * nasobitel);
+            this.vsechny_teziste.push(teziste_vysledne);
+            this.ro_all.push(ro);
+            this.E_all.push(E);
+        }
+
+        this.aktualizujPruseciky();
+    }
+
+    // 2. TADY JE MÍSTO PRO NOVOU FUNKCI SMAZÁNÍ
+    smazPolygon(index: number): void {
+        // Kontrola, zda index vůbec v poli existuje, abychom nesmazali něco mimo rozsah
+        if (index >= 0 && index < this.x_values_all.length) {
+            // Metoda .splice(index, 1) smaže 1 prvek na dané pozici a zbytek pole posune
+            this.x_values_all.splice(index, 1);
+            this.y_values_all.splice(index, 1);
+            this.a_values_all.splice(index, 1);
+            this.vsechny_plochy.splice(index, 1);
+            this.vsechny_momenty_setrvacnosti.splice(index, 1);
+            this.vsechny_dev_momenty.splice(index, 1);
+            this.vsechny_hmotnosti.splice(index, 1);
+            this.vsechny_teziste.splice(index, 1);
+            this.ro_all.splice(index, 1);
+            this.E_all.splice(index, 1);
+            this.aktualizujPruseciky();
+        }
+    }
+
+    // Vypočet průsečíků všech přímek ze všech polygonů navzájem
+    aktualizujPruseciky(): void {
+        // Nejdříve vyprázdníme staré průsečíky
+        this.vsechny_pruseciky = [];
+
+        // Procházíme všechny polygony proti sobě (bez duplicit a porovnávání se sebou samým)
+        for (let i = 0; i < this.a_values_all.length; i++) {
+            for (let j = i + 1; j < this.a_values_all.length; j++) {
+                
+                // Přidán vykřičník pro bezpečnost v TypeScriptu
+                const smernice_poly1 = this.a_values_all[i]!;
+                const smernice_poly2 = this.a_values_all[j]!;
+
+                // Procházíme všechny hrany prvního polygonu proti všem hranám druhého
+                for (let k = 0; k < smernice_poly1.length; k++) {
+                    for (let l = 0; l < smernice_poly2.length; l++) {
+                        
+                        const s1 = smernice_poly1[k]!;
+                        const s2 = smernice_poly2[l]!;
+
+                        if (s1.typ === "svisla" && s2.typ === "svisla") {
+                            // Obě přímky jsou svislé -> nikdy se neprotnou (jsou rovnoběžné)
+                            continue;
+                        } 
+                        else if (s1.typ === "svisla" && s2.typ === "klasicka") {
+                            // První je svislá (má fixní X), druhá je klasická (y = ax + b)
+                            const x = s1.x;
+                            const y = s2.a * x + s2.b;
+                            this.vsechny_pruseciky.push({ x, y });
+                        } 
+                        else if (s1.typ === "klasicka" && s2.typ === "svisla") {
+                            // První je klasická, druhá je svislá
+                            const x = s2.x;
+                            const y = s1.a * x + s1.b;
+                            this.vsechny_pruseciky.push({ x, y });
+                        } 
+                        else if (s1.typ === "klasicka" && s2.typ === "klasicka") {
+                            // Obě jsou klasické (y = ax + b)
+                            if (Math.abs(s1.a - s2.a) < 1e-9) {
+                                // Směrnice "a" jsou téměř stejné -> rovnoběžky
+                                continue;
+                            }
+                            // Výpočet průsečíku
+                            const x = (s2.b - s1.b) / (s1.a - s2.a);
+                            const y = s1.a * x + s1.b;
+                            this.vsechny_pruseciky.push({ x, y });
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -247,6 +318,4 @@ export class SpravceTeles {
 
 
 
-// doplnit prusečíky přímek
 
-// do testů přidat daleko více polygonů, nějaký random tvary zkusit, pak napříč kvadrantama, a pak mě zajímá ten deviační moment po a proti směru hodinových ručiček

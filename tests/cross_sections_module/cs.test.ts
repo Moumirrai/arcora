@@ -241,9 +241,121 @@ describe("Komplexní testování třídy - SpravceTeles", () => {
         // 4. Hmotnost díry = odečet hmotnosti
         expect(spravce.vsechny_hmotnosti[0]).toBeCloseTo(-0.000002, 7);
     });
+
+        it("Velký náhodný polygon přes všechny kvadranty (Přičítání +)", () => {
+        // Obdélník zadaný body: (0,0) -> (4,0) -> (4,2) -> (0,2)
+        spravce.zpracujPolygon([-50, -20, -85, -30, -40, 0, 60, -20, 70, 110, 20, 30, -20, -100, -100, -80], [12, 20, 39, 100, 50, 120, 100, 50, 40, -30, 20, -50, -60, -30, 10, -20], "+", 1.0, 210);
+
+        // Ověříme, že se uložil do paměti právě jeden záznam
+        expect(spravce.vsechny_plochy.length).toBe(1);
+
+        // 1. Plocha 
+        expect(spravce.vsechny_plochy[0]).toBeCloseTo(16315, 2);
+
+        // 2. Těžiště 
+        expect(spravce.vsechny_teziste[0]!.x).toBeCloseTo(-6.68, 2);
+        expect(spravce.vsechny_teziste[0]!.y).toBeCloseTo(18.74, 2);
+
+        // 3. Momenty setrvačnosti k těžišti
+        expect(spravce.vsechny_momenty_setrvacnosti[0]![0]).toBeCloseTo(31747859.71, 2);
+        expect(spravce.vsechny_momenty_setrvacnosti[0]![1]).toBeCloseTo(29943223.95, 2);
+
+        // 4. Deviační moment
+        expect(spravce.vsechny_dev_momenty[0]).toBeCloseTo(4728673.49, 2);
+
+        // 5. Hmotnost na bm 
+        expect(spravce.vsechny_hmotnosti[0]).toBeCloseTo(0.02, 2);
+    });
+
+            it("Polygon zadáván protisměru hodinových ručiček (Přičítání +)", () => {
+        // Obdélník zadaný body: (0,0) -> (4,0) -> (4,2) -> (0,2)
+        spravce.zpracujPolygon([40, 60, -50, -40], [20, 40, 80, -20], "+", 1.0, 210);
+
+        // Ověříme, že se uložil do paměti právě jeden záznam
+        expect(spravce.vsechny_plochy.length).toBe(1);
+
+        // 1. Plocha 
+        expect(spravce.vsechny_plochy[0]).toBeCloseTo(5700, 2);
+
+        // 2. Těžiště 
+        expect(spravce.vsechny_teziste[0]!.x).toBeCloseTo(-7.89, 2);
+        expect(spravce.vsechny_teziste[0]!.y).toBeCloseTo(31.93, 2);
+
+        // 3. Momenty setrvačnosti k těžišti
+        expect(spravce.vsechny_momenty_setrvacnosti[0]![0]).toBeCloseTo(2448771.93, 2);
+        expect(spravce.vsechny_momenty_setrvacnosti[0]![1]).toBeCloseTo(3789736.84, 2);
+
+        // 4. Deviační moment
+        expect(spravce.vsechny_dev_momenty[0]).toBeCloseTo(-28157.89, 2);
+
+        // 5. Hmotnost na bm 
+        expect(spravce.vsechny_hmotnosti[0]).toBeCloseTo(0.01, 2);
+    });
 });
 
 
+describe("Testování průsečíků - aktualizujPruseciky", () => {
+    let spravce: SpravceTeles;
 
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+
+    it("Průsečíky dvou překrývajících se obdélníků (svislé a klasické čáry)", () => {
+        // Obdélník 1: Vodorovný pruh
+        // Hrany (nekonečné přímky): y = 2, x = 6, y = 4, x = 0
+        spravce.zpracujPolygon([0, 6, 6, 0], [2, 2, 4, 4], "+", 1.0, 210);
+
+        // Obdélník 2: Svislý pruh (společně tvoří kříž)
+        // Hrany (nekonečné přímky): y = 0, x = 4, y = 6, x = 2
+        spravce.zpracujPolygon([2, 4, 4, 2], [0, 0, 6, 6], "+", 1.0, 210);
+
+        // --- MATEMATIKA PRŮSEČÍKŮ ---
+        // Svislé čáry P1 (x=0, x=6) protnou vodorovné čáry P2 (y=0, y=6) -> 4 body
+        // Vodorovné čáry P1 (y=2, y=4) protnou svislé čáry P2 (x=2, x=4) -> 4 body
+        // Svislá vs Svislá se nikdy neprotne (rovnoběžky). Vodorovná vs Vodorovná se neprotne.
+        // Celkem očekáváme přesně 8 průsečíků.
+        
+        expect(spravce.vsechny_pruseciky.length).toBe(8);
+
+        // Pomocná funkce pro ověření, zda seznam průsečíků obsahuje hledaný bod (s mírnou tolerancí floatu)
+        const obsahujeBod = (hledaneX: number, hledaneY: number) => {
+            return spravce.vsechny_pruseciky.some(
+                p => Math.abs(p.x - hledaneX) < 1e-5 && Math.abs(p.y - hledaneY) < 1e-5
+            );
+        };
+
+        // 1. Otestujeme vnitřní rohy kříže (kde se tvary reálně překrývají)
+        expect(obsahujeBod(2, 2)).toBe(true);
+        expect(obsahujeBod(4, 2)).toBe(true);
+        expect(obsahujeBod(2, 4)).toBe(true);
+        expect(obsahujeBod(4, 4)).toBe(true);
+
+        // 2. Otestujeme vnější rohy (kde se protínají prodloužené nekonečné přímky hran)
+        expect(obsahujeBod(0, 0)).toBe(true);
+        expect(obsahujeBod(6, 0)).toBe(true);
+        expect(obsahujeBod(0, 6)).toBe(true);
+        expect(obsahujeBod(6, 6)).toBe(true);
+    });
+
+    it("Průsečíky klasických šikmých přímek", () => {
+        // Trojúhelník 1: Přepona roste (rovnice přímky y = x)
+        spravce.zpracujPolygon([0, 4, 0], [0, 4, 4], "+", 1.0, 210);
+
+        // Trojúhelník 2: Přepona klesá (rovnice přímky y = -x + 4)
+        spravce.zpracujPolygon([0, 4, 4], [4, 0, 4], "+", 1.0, 210);
+
+        // Zde by se měly dvě šikmé přímky (y = x) a (y = -x + 4) protnout přesně v bodě [2, 2]
+        const obsahujeBod = (hledaneX: number, hledaneY: number) => {
+            return spravce.vsechny_pruseciky.some(
+                p => Math.abs(p.x - hledaneX) < 1e-5 && Math.abs(p.y - hledaneY) < 1e-5
+            );
+        };
+
+        expect(obsahujeBod(2, 2)).toBe(true);
+        expect(obsahujeBod(4, 4)).toBe(true);
+        expect(obsahujeBod(0, 4)).toBe(true);
+    });
+});
 
 
