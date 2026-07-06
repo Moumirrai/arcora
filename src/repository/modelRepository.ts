@@ -59,11 +59,11 @@ export class ModelRepository {
       return;
     }
 
-    this.emitChange(changes);
-
     this.#undoStack.push(transaction);
     if (this.#undoStack.length > this.#maxUndoHistory) this.#undoStack.shift();
     this.#redoStack = [];
+
+    this.emitChange(changes);
   }
 
   public undo(count: number = 1): void {
@@ -113,11 +113,12 @@ export class ModelRepository {
         return;
       }
 
-      this.emitChange(changes);
-
       this.#undoStack.push(transaction);
-      if (this.#undoStack.length > this.#maxUndoHistory)
+      if (this.#undoStack.length > this.#maxUndoHistory) {
         this.#undoStack.shift();
+      }
+
+      this.emitChange(changes);
     }
   }
 }

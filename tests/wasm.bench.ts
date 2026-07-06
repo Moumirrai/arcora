@@ -14,9 +14,9 @@ import {
 
 // ── Generator ──────────────────────────────────────────────────────────────
 
-const N = 20; // matrix size — change to 500, 1000, 2000 etc.
+const N = 500; // matrix size — change to 500, 1000, 2000 etc.
 const B_COUNT = 5; // number of pre-generated RHS vectors
-const BANDWIDTH = 4; // sparsity: each row connects to ±BANDWIDTH neighbors
+const BANDWIDTH = 6; // sparsity: each row connects to ±BANDWIDTH neighbors
 
 type Triplet = [number, number, number];
 
