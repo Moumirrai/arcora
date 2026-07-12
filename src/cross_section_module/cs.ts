@@ -116,6 +116,21 @@ export interface CelkoveCharakteristiky {
     i_min: number;
 }
 
+export type TypZatizeni = "bodove" | "liniove" | "plosne";
+
+export interface ZadaniZatizeni {
+    hodnota: number; // Bodové [N], Liniové [N/m], Plošné [N/m^2]
+    x_val: number[]; // Souřadnice X pro zadání
+    y_val: number[]; // Souřadnice Y pro zadání
+}
+
+export interface RovniceNapeti {
+    polygon_id: string | number;
+    a: number;
+    b: number;
+    c: number;
+    rovnice_text: string;
+}
 
 export class Polygon {
     x_val: number[];
@@ -504,8 +519,149 @@ spocitejCelkove(): CelkoveCharakteristiky {
             i_min
         };
     }
-}
 
+    // --- POMOCNÁ METODA PRO VÝPOČET NÁHRADNÍCH SIL ---
+    // Změněno: odstraněno "export function", nyní je to běžná metoda třídy
+    prevodZatizeniNaSily(zatizeni: ZadaniZatizeni[]) {
+        let Fz_celk = 0;
+        let Mx_celk = 0;
+        let My_celk = 0;
+
+        for (const z of zatizeni) {
+            const pocetBodu = z.x_val.length;
+            
+            // Převod souřadnic z mm na metry pro fyzikální výpočet
+            const x_m = z.x_val.map(x => x / 1000);
+            const y_m = z.y_val.map(y => y / 1000);
+
+            if (pocetBodu === 1) {
+                // A) BODOVÉ ZATÍŽENÍ (1 bod)
+                // Přidány vykřičníky pro ujištění TypeScriptu, že hodnota existuje
+                const F = z.hodnota;
+                Fz_celk += F;
+                Mx_celk += F * y_m[0]!;
+                My_celk += F * x_m[0]!;
+                
+            } else if (pocetBodu === 2) {
+                // B) LINIOVÉ ZATÍŽENÍ (2 body)
+                const dx = x_m[1]! - x_m[0]!;
+                const dy = y_m[1]! - y_m[0]!;
+                const delka_m = Math.sqrt(dx * dx + dy * dy);
+                
+                const F = z.hodnota * delka_m;
+                const stred_x = (x_m[0]! + x_m[1]!) / 2;
+                const stred_y = (y_m[0]! + y_m[1]!) / 2;
+                
+                Fz_celk += F;
+                Mx_celk += F * stred_y;
+                My_celk += F * stred_x;
+                
+            } else if (pocetBodu >= 3) {
+                // C) PLOŠNÉ ZATÍŽENÍ (3 a více bodů = polygon)
+                let plocha_m2 = 0;
+                let teziste_x_m = 0;
+                let teziste_y_m = 0;
+
+                for (let i = 0; i < pocetBodu; i++) {
+                    const j = (i + 1) % pocetBodu;
+                    const faktor = (x_m[i]! * y_m[j]! - x_m[j]! * y_m[i]!);
+                    plocha_m2 += faktor;
+                    teziste_x_m += (x_m[i]! + x_m[j]!) * faktor;
+                    teziste_y_m += (y_m[i]! + y_m[j]!) * faktor;
+                }
+                plocha_m2 = Math.abs(plocha_m2 / 2);
+                teziste_x_m = teziste_x_m / (6 * (plocha_m2 * Math.sign(plocha_m2 || 1)));
+                teziste_y_m = teziste_y_m / (6 * (plocha_m2 * Math.sign(plocha_m2 || 1)));
+
+                const F = z.hodnota * plocha_m2; 
+                
+                Fz_celk += F;
+                Mx_celk += F * teziste_y_m;
+                My_celk += F * teziste_x_m;
+            }
+        }
+
+        return { Fz: Fz_celk, Mx: Mx_celk, My: My_celk };
+    }
+
+    // --- HLAVNÍ METODA PRO VÝPOČET ROVNICE ROVINY NAPĚTÍ ---
+    spocitejRovniceNapeti(zatizeni: ZadaniZatizeni[]): RovniceNapeti[] {
+        const sily = this.prevodZatizeniNaSily(zatizeni);
+        const celk = this.spocitejCelkove();
+
+        // Příprava konstant pro Navierův vzorec (v metrech)
+        const A_m2 = celk.vysledna_plocha * 1e-6;
+        const Ix_m4 = celk.vysledny_moment_x * 1e-12;
+        const Iy_m4 = celk.vysledny_moment_y * 1e-12;
+        const Dxy_m4 = celk.vysledny_dev_moment * 1e-12;
+        const xt_m = celk.teziste_x * 1e-3;
+        const yt_m = celk.teziste_y * 1e-3;
+        const N = sily.Fz;
+        const Mx_t = sily.Mx - N * yt_m;
+        const My_t = sily.My - N * xt_m;
+        const jmenovatel = (Ix_m4 * Iy_m4) - (Dxy_m4 * Dxy_m4);
+
+        // Kontrola platnosti geometrie
+        if (Math.abs(jmenovatel) < 1e-40) {
+            throw new Error("Geometrie má nulovou nebo neplatnou tuhost.");
+        }
+
+        const E_ref = this.zvolene_E_ref ?? Math.max(...this.polygony.map(p => p.E));
+
+        // Plnohodnotné koeficienty Navierova vzorce pre ohyb 
+        const a_ref = (My_t * Ix_m4 - Mx_t * Dxy_m4) / jmenovatel; 
+        const b_ref = (Mx_t * Iy_m4 - My_t * Dxy_m4) / jmenovatel; 
+
+        return this.polygony.map(poly => {
+            // 1. Získání prvích 3 bodů pro sestavení soustavy (v metrech)
+            const body = poly.x_val.slice(0, 3).map((x, i) => ({ 
+                x: x / 1000, 
+                y: poly.y_val[i]! / 1000 
+            }));
+            
+            // 2. Výpočet přesného napětí v těchto 3 bodích pomocí správného Navierova vzorce
+            const sigma = body.map(b => {
+                const n = poly.E / E_ref;
+                const sigma_ref = (N / A_m2) + a_ref * (b.x - xt_m) + b_ref * (b.y - yt_m);
+                return sigma_ref * n;
+            });
+
+            // 3. Řešení soustavy 3 rovnic o 3 neznámych (ax + by + c = sigma) pomocí symetrického Cramerovho pravidla
+            const det = body[0]!.x * (body[1]!.y - body[2]!.y) +
+                        body[1]!.x * (body[2]!.y - body[0]!.y) +
+                        body[2]!.x * (body[0]!.y - body[1]!.y);
+
+            const detA = sigma[0]! * (body[1]!.y - body[2]!.y) +
+                        sigma[1]! * (body[2]!.y - body[0]!.y) +
+                        sigma[2]! * (body[0]!.y - body[1]!.y);
+
+            const detB = body[0]!.x * (sigma[1]! - sigma[2]!) +
+                        body[1]!.x * (sigma[2]! - sigma[0]!) +
+                        body[2]!.x * (sigma[0]! - sigma[1]!);
+
+            const detC = body[0]!.x * (body[1]!.y * sigma[2]! - body[2]!.y * sigma[1]!) +
+                        body[1]!.x * (body[2]!.y * sigma[0]! - body[0]!.y * sigma[2]!) +
+                        body[2]!.x * (body[0]!.y * sigma[1]! - body[1]!.y * sigma[0]!);
+
+            const a = detA / det;
+            const b = detB / det;
+            const c = detC / det;
+
+            // 4. Prepočet na mm (koeficienty a, b vydelíme 1000, c zústává v Pa)
+            const a_mm = a / 1000;
+            const b_mm = b / 1000;
+
+
+            return {
+                polygon_id: poly.id,
+                a: a_mm,
+                b: b_mm,
+                c: c,
+                rovnice_text: `z = ${a_mm.toExponential(4)}*x_mm + ${b_mm.toExponential(4)}*y_mm + ${c.toExponential(4)}`
+            };
+        });
+    }
+}
 
 
 

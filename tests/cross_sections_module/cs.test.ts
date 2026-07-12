@@ -8,6 +8,7 @@ import {
     Polygon
 } from "@arcora/cross_section_module/cs"; 
 import { SpravceTeles } from "@arcora/cross_section_module/cs";
+import type { ZadaniZatizeni } from "@arcora/cross_section_module/cs";
 
 // --- NEZÁVISLÉ GEOMETRICKÉ FUNKCE ---
 
@@ -377,7 +378,282 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     });
 });
 
-
-
 // zkusit random průřezy napříč kvadrantama a zadavaný proti směru hodinových ručiček (u toho checknout deviační moment)
+
+
+
+describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+        // Pro všechny testy vytvoříme stejný základní obdélník 4x2 v počátku
+        // Těžiště je v bodě [2, 1], Plocha = 8
+        const p1 = new Polygon([0, 4, 4, 0], [0, 0, 2, 2], true, 1.0, 210);
+        spravce.polygony.push(p1);
+    });
+
+    it("1. Čistý centrický tlak (Bodové zatížení v těžišti)", () => {
+        // Síla 8000 N působí přesně v těžišti [2, 1]
+        // Nezpůsobuje žádný ohyb (Mx=0, My=0). 
+        // Napětí musí být konstantní po celém průřezu: sigma = N / A = 8000 / 8 = 1000
+        // Rovnice roviny: z = 0x + 0y + 1000
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 8000,
+            x_val: [2],
+            y_val: [1]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        
+        expect(vysledky.length).toBe(1);
+        const rovina = vysledky[0]!;
+
+        expect(rovina.a).toBeCloseTo(0, 4);    // x-ová složka sklonu
+        expect(rovina.b).toBeCloseTo(0, 4);    // y-ová složka sklonu
+        expect(rovina.c).toBeCloseTo(1000000000, 4); // posun (konstanta)
+    });
+
+    it("2. Rovnoměrné plošné zatížení (Konstantní tlak)", () => {
+        // Plošné zatížení 1000 N/m² nanesené přesně na náš polygon 4x2
+        // Náhradní síla: 1000 * 8 = 8000 N, působí v těžišti [2, 1]
+        // Výsledek musí být identický jako u centrického tlaku: z = 0x + 0y + 1000
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 1000,
+            x_val: [0, 4, 4, 0],
+            y_val: [0, 0, 2, 2]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const rovina = vysledky[0]!;
+
+        expect(rovina.a).toBeCloseTo(0, 4);
+        expect(rovina.b).toBeCloseTo(0, 4);
+        expect(rovina.c).toBeCloseTo(1000, 4);
+    });
+
+    it("3. Excentrický tlak (Ohyb kolem osy X)", () => {
+        // Síla 8000 N posunutá na horní hranu obdélníku do bodu [2, 2]
+        // Excentricita ey = +1 m (posun od těžiště [2,1] směrem nahoru)
+        // Vyvolá ohybový moment Mx = 8000 * 1 = 8000 Nm
+        // Podle Navierovy rovnice vyjde rovina: z = 0x + 3000y - 2000
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 8000,
+            x_val: [2],
+            y_val: [2]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const rovina = vysledky[0]!;
+
+        // Očekáváme z = 0x + 3000y - 2000
+        expect(rovina.a).toBeCloseTo(0, 4);
+        expect(rovina.b).toBeCloseTo(3000000000, 4);
+        expect(rovina.c).toBeCloseTo(-2000000000, 4);
+    });
+
+    it("4. Liniové zatížení po spodní hraně (Excentricita v ose Y)", () => {
+        // Liniové zatížení 2000 N/m po délce 4 m (spodní hrana X: 0->4, Y: 0)
+        // Náhradní síla F = 8000 N v těžišti linie [2, 0]
+        // Excentricita ey = -1 m (posun dolů)
+        // Vyvolá ohybový moment Mx = -8000 Nm
+        // Rovina by měla být opačně nakloněná: z = 0x - 3000y + 4000
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 2000,
+            x_val: [0, 4],
+            y_val: [0, 0]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const rovina = vysledky[0]!;
+
+        expect(rovina.a).toBeCloseTo(0, 4);
+        expect(rovina.b).toBeCloseTo(-3000000, 4);
+        expect(rovina.c).toBeCloseTo(4000000, 4);
+    });
+});
+
+
+describe("Nehomogenní průřezy (Kombinace odlišných materiálů)", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+
+    it("1. Sendvičový průřez (Dva materiály nad sebou) - Posun neutrální osy k tužšímu", () => {
+        // Spodní část: Ocel (šířka 10, výška 2), E = 210 GPa, hustota 7850
+        // Fyzická plocha = 20, lokální těžiště y = 1
+        const ocel = new Polygon([0, 10, 10, 0], [0, 0, 2, 2], true, 7850, 210);
+        
+        // Horní část: Měkčí materiál (šířka 10, výška 8), E = 21 GPa (10x měkčí), hustota 500
+        // Fyzická plocha = 80, lokální těžiště y = 6
+        const drevo = new Polygon([0, 10, 10, 0], [2, 2, 10, 10], true, 500, 21);
+        
+        spravce.polygony.push(ocel, drevo);
+
+        // Nastavení referenčního modulu pružnosti na ocel
+        spravce.zvolene_E_ref = 210;
+        const vysledky = spravce.spocitejCelkove();
+
+        // Očekávané chování ideálního průřezu:
+        // Fyzická plocha celkem je 100, ale ideální se přepočítá přes poměr E
+        // A_id = 20*1 + 80*(21/210) = 20 + 8 = 28
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(10, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(10, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
+
+        // Těžiště by mělo být staženo dolů k tužšímu materiálu (oceli)
+        // Y_t_id = (20 * 1 + 8 * 6) / 28 = (20 + 48) / 28 = 68 / 28 ≈ 2.42857
+        expect(vysledky.teziste_x).toBeCloseTo(5, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(2.42857, 4);
+    });
+
+    it("2. Asymetrický průřez z různých materiálů (Vedle sebe) - Posun těžiště v ose X", () => {
+        // Levá část: Tužší materiál (např. E=200 GPa)
+        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 2.5
+        const levyTuhaCast = new Polygon([0, 5, 5, 0], [0, 0, 10, 10], true, 1.0, 200);
+        
+        // Pravá část: 4x měkčí materiál (E=50 GPa)
+        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 7.5
+        const pravaMekciCast = new Polygon([5, 10, 10, 5], [0, 0, 10, 10], true, 1.0, 50);
+        
+        spravce.polygony.push(levyTuhaCast, pravaMekciCast);
+
+        // Referenční E nastavíme na tužší materiál
+        spravce.zvolene_E_ref = 200; 
+        const vysledky = spravce.spocitejCelkove();
+
+        // Výpočet ideální plochy:
+        // A_id = 50 * (200/200) + 50 * (50/200) = 50 + 12.5 = 62.5
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
+
+        // Těžiště X se musí posunout doleva k tužšímu materiálu
+        // X_t_id = (50 * 2.5 + 12.5 * 7.5) / 62.5 = (125 + 93.75) / 62.5 = 218.75 / 62.5 = 3.5
+        expect(vysledky.teziste_x).toBeCloseTo(3.5, 5);
+        
+        // V ose Y jsou oba polygony stejné, těžiště musí zůstat přesně uprostřed
+        expect(vysledky.teziste_y).toBeCloseTo(5, 5);
+    });
+});
+
+
+describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejRovniceNapeti", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+        
+        // Vytvoříme jednoduchý složený průřez, aby se dobře kontrolovaly hodnoty
+        // Poly 1 (Dole): Tužší materiál (např. Ocel), E = 200 GPa
+        // Šířka 10, výška 2 (y od 0 do 2). Fyzická plocha = 20. Těžiště y = 1.
+        const p1 = new Polygon([0, 100, 100, 0], [0, 0, 20, 20], true, 1.0, 200);
+        
+        // Poly 2 (Nahoře): 2x měkčí materiál, E = 100 GPa
+        // Šířka 10, výška 4 (y od 2 do 6). Fyzická plocha = 40. Těžiště y = 4.
+        const p2 = new Polygon([0, 100, 100, 0], [20, 20, 60, 60], true, 1.0, 100);
+        
+        spravce.polygony.push(p1, p2);
+        spravce.zvolene_E_ref = 200; // Referenční modul je tužší materiál
+
+        // Nutné zavolat před výpočtem napětí, aby se určilo ideální těžiště a momenty
+        // Očekávané ideální hodnoty interně:
+        // A_id = 20*1 + 40*0.5 = 40
+        // Těžiště Y_id = (20*1 + 20*4) / 40 = 2.5
+        // Ix_id = 123.33333
+        spravce.spocitejCelkove(); 
+    });
+
+    it("1. Čistý centrický tlak - Napětí se skokově mění podle tuhosti materiálu", () => {
+        // Zatížení 40 000 N umístěné přesně v ideálním těžišti [5, 2.5]
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 40000,
+            x_val: [50],
+            y_val: [25]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        
+        // Očekáváme, že funkce vrátí samostatnou rovnici roviny pro každý polygon
+        expect(vysledky.length).toBe(2);
+        const rovinaPoly1 = vysledky[0]!; // Tužší (E=200)
+        const rovinaPoly2 = vysledky[1]!; // Měkčí (E=100)
+
+        // Tužší materiál (přebírá plné napětí ideálního průřezu)
+        // sigma_1 = (N / A_id) * (200/200) = (40000 / 40) * 1 = 1000
+        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.c).toBeCloseTo(6666666.666667, 4);
+
+        // Měkčí materiál (přebírá pouze polovinu napětí)
+        // sigma_2 = (N / A_id) * (100/200) = (40000 / 40) * 0.5 = 500
+        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.c).toBeCloseTo(3333333.333333, 4);
+    });
+
+    it("2. Excentrický tlak (Ohyb) - Rovina napětí má odlišný sklon pro každý materiál", () => {
+        // Síla 40 000 N působí mimo těžiště v ose Y = 3.5 (excentricita ey = 1 m nahoru)
+        // Vyvolá konstantní tlak + ohybový moment Mx = 40 000 Nm
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 40000,
+            x_val: [50],
+            y_val: [35]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        
+        const rovinaPoly1 = vysledky[0]!; // Tužší (E=200)
+        const rovinaPoly2 = vysledky[1]!; // Měkčí (E=100)
+
+        // Analytický předpoklad pro IDEÁLNÍ průřez ze vzorce Navierovy hypotézy v globálních souřadnicích:
+        // sigma_id(y) = 324.3243 * y + 189.1892
+        
+        // Poly 1 (E=200) - Odpovídá referenčnímu modulu, rovnice je 1:1 s ideálním průřezem
+        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b).toBeCloseTo(324324.324, 0); // sklon b
+        expect(rovinaPoly1.c).toBeCloseTo(-1441441.441, 3); // konstanta c
+
+        // Poly 2 (E=100) - Rovina napětí musí být poloviční (jak sklon, tak celkový posun)
+        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b).toBeCloseTo(162162.162, 3); // poloviční sklon (324.3243 / 2)
+        expect(rovinaPoly2.c).toBeCloseTo(-720720.7207, 3);  // poloviční konstanta (189.1892 / 2)
+    });
+
+        it("3. Liniové zatížení", () => {
+        // Síla 40 000 N působí mimo těžiště v ose Y = 3.5 (excentricita ey = 1 m nahoru)
+        // Vyvolá konstantní tlak + ohybový moment Mx = 40 000 Nm
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: 2000,
+            x_val: [25, 75],
+            y_val: [25, 25]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        
+        const rovinaPoly1 = vysledky[0]!; // Tužší (E=200)
+        const rovinaPoly2 = vysledky[1]!; // Měkčí (E=100)
+
+        // Analytický předpoklad pro IDEÁLNÍ průřez ze vzorce Navierovy hypotézy v globálních souřadnicích:
+        // sigma_id(y) = 324.3243 * y + 189.1892
+        
+        // Poly 1 (E=200) - Odpovídá referenčnímu modulu, rovnice je 1:1 s ideálním průřezem
+        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b).toBeCloseTo(0, 0); // sklon b
+        expect(rovinaPoly1.c).toBeCloseTo(16666.6667, 3); // konstanta c
+
+        // Poly 2 (E=100) - Rovina napětí musí být poloviční (jak sklon, tak celkový posun)
+        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b).toBeCloseTo(0, 3); // poloviční sklon (324.3243 / 2)
+        expect(rovinaPoly2.c).toBeCloseTo(8333.3333, 3);  // poloviční konstanta (189.1892 / 2)
+    });
+});
+
+
+
+
+
+
+
+
 
