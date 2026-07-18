@@ -90,6 +90,7 @@ export interface Bod {
 
 export interface CelkoveCharakteristiky {
     vysledna_plocha: number;
+    vysledna_plocha_id: number;
     celkova_hmotnost: number;
     celkova_vyska_h: number;
     celkova_sirka_b: number;
@@ -375,7 +376,7 @@ spocitejCelkove(): CelkoveCharakteristiky {
             ? this.zvolene_E_ref 
             : Math.max(...validniPolygony.map(p => p.E));
 
-        // --- 3. CELKOVÉ E TĚŽIŠTĚ ---
+        // --- 3. CELKOVÉ E TĚŽIŠTĚ A IDEÁLNÍ PLOCHA ---
         let jmenovatel_E = 0;
         let citatel_x = 0;
         let citatel_y = 0;
@@ -389,6 +390,9 @@ spocitejCelkove(): CelkoveCharakteristiky {
 
         const vysledne_Eteziste_x = jmenovatel_E !== 0 ? citatel_x / jmenovatel_E : 0;
         const vysledne_Eteziste_y = jmenovatel_E !== 0 ? citatel_y / jmenovatel_E : 0;
+
+        // Výpočet ideální plochy (vydělením E_ref dostaneme Σ(A_i * (E_i / E_ref)))
+        const vysledna_plocha_id = jmenovatel_E / E_ref;
 
         // --- 4. STEINEROVA VĚTA: MOMENTY A DEVIAČNÍ MOMENT ---
         let vysledny_moment_x = 0;
@@ -476,16 +480,12 @@ spocitejCelkove(): CelkoveCharakteristiky {
         const W_min_l = vysledny_moment_min / (Math.abs(min_u_kladne) || 1e-9);
 
         // --- 10. POLOMĚRY SETRVAČNOSTI ---
-        let AE_souveti = 0;
-        for (const poly of validniPolygony) {
-            AE_souveti += poly.vysledky!.plocha * (poly.E / E_ref);
-        }
-        AE_souveti = AE_souveti || 1e-9; // Pojistka proti dělení nulou
+        const plocha_pro_i = vysledna_plocha_id || 1e-9; // Pojistka proti dělení nulou
 
-        const i_x = Math.sqrt(vysledny_moment_x / AE_souveti);
-        const i_y = Math.sqrt(vysledny_moment_y / AE_souveti);
-        const i_max = Math.sqrt(vysledny_moment_max / AE_souveti);
-        const i_min = Math.sqrt(vysledny_moment_min / AE_souveti);
+        const i_x = Math.sqrt(vysledny_moment_x / plocha_pro_i);
+        const i_y = Math.sqrt(vysledny_moment_y / plocha_pro_i);
+        const i_max = Math.sqrt(vysledny_moment_max / plocha_pro_i);
+        const i_min = Math.sqrt(vysledny_moment_min / plocha_pro_i);
 
         // --- 11. ROZMĚRY PRŮŘEZU ---
         const celkova_vyska_h = Math.abs(max_y_kladne - min_y_kladne);
@@ -493,6 +493,7 @@ spocitejCelkove(): CelkoveCharakteristiky {
 
         return {
             vysledna_plocha,
+            vysledna_plocha_id,
             celkova_hmotnost,
             celkova_vyska_h,
             celkova_sirka_b,
@@ -558,22 +559,55 @@ spocitejCelkove(): CelkoveCharakteristiky {
                 
             } else if (pocetBodu >= 3) {
                 // C) PLOŠNÉ ZATÍŽENÍ (3 a více bodů = polygon)
-                let plocha_m2 = 0;
-                let teziste_x_m = 0;
-                let teziste_y_m = 0;
+                let plocha_a_smer = 0;
+                let suma_moment_plochy_x_kladne = 0;
+                let suma_moment_plochy_x_zaporne = 0;
+                let suma_moment_plochy_y_kladne = 0;
+                let suma_moment_plochy_y_zaporne = 0;
 
                 for (let i = 0; i < pocetBodu; i++) {
                     const j = (i + 1) % pocetBodu;
-                    const faktor = (x_m[i]! * y_m[j]! - x_m[j]! * y_m[i]!);
-                    plocha_m2 += faktor;
-                    teziste_x_m += (x_m[i]! + x_m[j]!) * faktor;
-                    teziste_y_m += (y_m[i]! + y_m[j]!) * faktor;
-                }
-                plocha_m2 = Math.abs(plocha_m2 / 2);
-                teziste_x_m = teziste_x_m / (6 * (plocha_m2 * Math.sign(plocha_m2 || 1)));
-                teziste_y_m = teziste_y_m / (6 * (plocha_m2 * Math.sign(plocha_m2 || 1)));
+                    const x1 = x_m[i]!;
+                    const y1 = y_m[i]!;
+                    const x2 = x_m[j]!;
+                    const y2 = y_m[j]!;
 
-                const F = z.hodnota * plocha_m2; 
+                    const dx = x2 - x1;
+                    if (Math.abs(dx) < 1e-12) continue; // Svislá čára netvoří plochu pod vektorem
+
+                    const plocha_pod = plochaPodVektorem(x1, x2, y1, y2);
+                    const abs_plocha_pod = Math.abs(plocha_pod);
+                    const [xt_pod, yt_pod] = tezistePlochyPodVektorem(x1, x2, y1, y2);
+                    
+                    // Zásadní oprava: plocha_a_smer se musí sčítat/odečítat přesně podle dx, 
+                    // aby to drželo krok s momenty a poznalo to CW / CCW směr zadání.
+                    if (dx > 0) {
+                        plocha_a_smer += abs_plocha_pod;
+                        suma_moment_plochy_x_kladne += abs_plocha_pod * xt_pod;
+                        suma_moment_plochy_y_kladne += abs_plocha_pod * yt_pod;
+                    } else if (dx < 0) {
+                        plocha_a_smer -= abs_plocha_pod;
+                        suma_moment_plochy_x_zaporne += abs_plocha_pod * xt_pod;
+                        suma_moment_plochy_y_zaporne += abs_plocha_pod * yt_pod;
+                    }
+                }
+
+                const plocha_abs = Math.abs(plocha_a_smer);
+                let teziste_x_m = 0;
+                let teziste_y_m = 0;
+
+                // Sloučení těžiště přesně podle tvé definice (funguje obousměrně)
+                if (plocha_abs > 1e-12) {
+                    if (plocha_a_smer > 0) {
+                        teziste_x_m = (suma_moment_plochy_x_kladne - suma_moment_plochy_x_zaporne) / plocha_abs;
+                        teziste_y_m = (suma_moment_plochy_y_kladne - suma_moment_plochy_y_zaporne) / plocha_abs;
+                    } else {
+                        teziste_x_m = (-suma_moment_plochy_x_kladne + suma_moment_plochy_x_zaporne) / plocha_abs;
+                        teziste_y_m = (-suma_moment_plochy_y_kladne + suma_moment_plochy_y_zaporne) / plocha_abs;
+                    }
+                }
+
+                const F = z.hodnota * plocha_abs; 
                 
                 Fz_celk += F;
                 Mx_celk += F * teziste_y_m;
@@ -590,7 +624,7 @@ spocitejCelkove(): CelkoveCharakteristiky {
         const celk = this.spocitejCelkove();
 
         // Příprava konstant pro Navierův vzorec (v metrech)
-        const A_m2 = celk.vysledna_plocha * 1e-6;
+        const A_m2 = celk.vysledna_plocha_id * 1e-6;
         const Ix_m4 = celk.vysledny_moment_x * 1e-12;
         const Iy_m4 = celk.vysledny_moment_y * 1e-12;
         const Dxy_m4 = celk.vysledny_dev_moment * 1e-12;
