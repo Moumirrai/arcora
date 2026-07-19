@@ -721,6 +721,49 @@ describe("Výpočet napětí pro náhodný průřez s nahodným zatížením", (
     });
 });
 
+describe("Výpočet napětí pro demonstrativní průřez z bakalářky", () => {
+    let spravce: SpravceTeles;
 
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+        
+        const p1 = new Polygon([0, 300, 300, 0], [0, 0, 140, 140], true, 1.0, 30);
+        const p2 = new Polygon([0, 300, 300, 0], [140, 140, 160, 160], true, 1.0, 210);
+        const p3 = new Polygon([0, 300, 300, 0], [160, 160, 260, 260], true, 1.0, 8);
+        
+        spravce.polygony.push(p1, p2, p3);
+        spravce.zvolene_E_ref = 30;
 
+        spravce.spocitejCelkove(); 
+    });
+        it("1. Necentrické zatížení, 1 bodová síla, 1 linearní zatížení", () => {
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: -19.231,
+            x_val: [150],
+            y_val: [0]
+        }, {
+            hodnota: 19.231,
+            x_val: [150],
+            y_val: [260]
+        }];
+
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        
+        const rovinaPoly1 = vysledky[0]!; 
+        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly3 = vysledky[2]!; 
+
+        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b).toBeCloseTo(17.5990, 0); 
+        expect(rovinaPoly1.c).toBeCloseTo(-2088.9271, 3); 
+
+        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b).toBeCloseTo(123.193136, 3); 
+        expect(rovinaPoly2.c).toBeCloseTo(-14622.48973, 3); 
+
+        expect(rovinaPoly3.a).toBeCloseTo(0, 4);
+        expect(rovinaPoly3.b).toBeCloseTo(4.6930718, 3); 
+        expect(rovinaPoly3.c).toBeCloseTo(-557.04722, 3); 
+    });
+});
 
