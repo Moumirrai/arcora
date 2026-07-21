@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
-
 export function plochaPodVektorem(x1: number, x2: number, y1: number, y2: number): number {
     return ((Math.abs(x1 - x2) * Math.abs(y1 - y2)) / 2) + (Math.abs(x1 - x2) * Math.min(Math.abs(y1), Math.abs(y2)));
 }
@@ -145,7 +143,7 @@ export class Vrchol {
 
     constructor(polygonId: string, x: number, y: number, id?: string) {
         // Pokud id nepřijde zvenčí, vygeneruje se nové
-        this.id = id || uuidv4();
+        this.id = id || crypto.randomUUID();
         this.polygonId = polygonId;
         this.x = x;
         this.y = y;
