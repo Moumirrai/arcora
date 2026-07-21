@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from "uuid";
+
 export function plochaPodVektorem(x1: number, x2: number, y1: number, y2: number): number {
     return ((Math.abs(x1 - x2) * Math.abs(y1 - y2)) / 2) + (Math.abs(x1 - x2) * Math.min(Math.abs(y1), Math.abs(y2)));
 }
@@ -133,9 +135,37 @@ export interface RovniceNapeti {
     rovnice_text: string;
 }
 
+export class Vrchol {
+    public readonly id: string;
+    public readonly polygonId: string; // Odkaz na mateřský polygon
+    
+    // Souřadnice vrcholu
+    public x: number;
+    public y: number;
+
+    constructor(polygonId: string, x: number, y: number, id?: string) {
+        // Pokud id nepřijde zvenčí, vygeneruje se nové
+        this.id = id || uuidv4();
+        this.polygonId = polygonId;
+        this.x = x;
+        this.y = y;
+    }
+
+    // Metoda pro export do čistého datového objektu (podobně jako má kolega toData())
+    toData() {
+        return {
+            id: this.id,
+            polygonId: this.polygonId,
+            x: this.x,
+            y: this.y
+        };
+    }
+}
+
 export class Polygon {
-    x_val: number[];
-    y_val: number[];
+    // 1. ZMĚNA: Polygon má nyní jako hlavní zdroj pravdy pole objektů Vrchol
+    vrcholy: Vrchol[];
+    
     kladne: boolean;
     ro: number;
     E: number;
@@ -150,44 +180,74 @@ export class Polygon {
         teziste: Bod;
     }
 
-    constructor(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number) {
-        this.id = crypto.randomUUID();
-        this.x_val = x_values;
-        this.y_val = y_values;
+    // 2. ZMĚNA: Gettery zajišťují, že pokud jiný kód ve tvé aplikaci 
+    // přistupuje k poly.x_val nebo poly.y_val, dostane stále pole čísel (zpětná kompatibilita).
+    get x_val(): number[] {
+        return this.vrcholy.map(v => v.x);
+    }
+
+    get y_val(): number[] {
+        return this.vrcholy.map(v => v.y);
+    }
+
+    constructor(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number, id?: string) {
+        this.id = id || crypto.randomUUID();
         this.kladne = kladne;
         this.ro = ro;
         this.E = E;
+        
+        // 3. ZMĚNA: Inicializace vrcholů do nového pole
+        this.vrcholy = [];
+        for (let i = 0; i < x_values.length; i++) {
+            this.vrcholy.push(new Vrchol(this.id, x_values[i]!, y_values[i]!));
+        }
+
         this.vypocet();
     }
+
     update(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number): void {
-        this.x_val = x_values;
-        this.y_val = y_values;
         this.kladne = kladne;
         this.ro = ro;
         this.E = E;
+        
+        // Přepsání vrcholů při aktualizaci
+        this.vrcholy = [];
+        for (let i = 0; i < x_values.length; i++) {
+            this.vrcholy.push(new Vrchol(this.id, x_values[i]!, y_values[i]!));
+        }
+
         this.vypocet();
     }
 
     private vypocet(): void {
-        if (this.x_val.length < 3) {
+        // 4. ZMĚNA: Úprava validace a uzavření polygonu tak, aby pracovala s objekty Vrchol
+        if (this.vrcholy.length < 3) {
             throw new Error("Pro výpočet zadejte alespoň 3 body");
         }
 
-        //zkontrolovat jestli první a poslední body jsou stejné - kdyžtak fixnout
-        if (this.x_val[0] !== this.x_val[this.x_val.length - 1] || this.y_val[0] !== this.y_val[this.y_val.length - 1]) {
-            this.x_val.push(this.x_val[0]!);
-            this.y_val.push(this.y_val[0]!);
+        // Zkontrolovat jestli první a poslední body jsou stejné - kdyžtak fixnout
+        const prvniVrchol = this.vrcholy[0]!;
+        const posledniVrchol = this.vrcholy[this.vrcholy.length - 1]!;
+        
+        if (prvniVrchol.x !== posledniVrchol.x || prvniVrchol.y !== posledniVrchol.y) {
+            // Vloží referenci na stejný objekt vrcholu, takže frontend ví, že jde o jeden a ten samý uzel
+            this.vrcholy.push(prvniVrchol); 
         }
+
+        // 5. ZMĚNA: Vytvoření lokálních polí x_val a y_val. 
+        // Díky tomu zbytek tvé matematické funkce (níže) zůstává naprosto stejný bez nutnosti zásahu.
+        const x_val = this.vrcholy.map(v => v.x);
+        const y_val = this.vrcholy.map(v => v.y);
 
         // --- VÝPOČET SMĚRNIC (a, b) ---
         const smernice_polygonu: Smernice[] = [];
         const eps = 1e-9;
 
-        for (let i = 0; i < this.x_val.length - 1; i++) {
-            const x1 = this.x_val[i]!;
-            const y1 = this.y_val[i]!;
-            const x2 = this.x_val[i + 1]!;
-            const y2 = this.y_val[i + 1]!;
+        for (let i = 0; i < x_val.length - 1; i++) {
+            const x1 = x_val[i]!;
+            const y1 = y_val[i]!;
+            const x2 = x_val[i + 1]!;
+            const y2 = y_val[i + 1]!;
 
             if (Math.abs(x1 - x2) < eps) {
                 smernice_polygonu.push({ typ: "svisla", x: x1 });
@@ -199,11 +259,11 @@ export class Polygon {
         }
 
         // --- POČÁTEK SOUŘADNÉHO SYSTÉMU S PŘEPOČTEM ---
-        const pocatek_x = Math.min(...this.x_val);
-        const pocatek_y = Math.min(...this.y_val);
+        const pocatek_x = Math.min(...x_val);
+        const pocatek_y = Math.min(...y_val);
 
-        const x_val_n = this.x_val.map(x => x - pocatek_x);
-        const y_val_n = this.y_val.map(y => y - pocatek_y);
+        const x_val_n = x_val.map(x => x - pocatek_x);
+        const y_val_n = y_val.map(y => y - pocatek_y);
 
         // --- PLOCHA A TĚŽIŠTĚ POD VEKTORY ---
         let suma_plochy_kladne = 0, suma_plochy_zaporne = 0;
