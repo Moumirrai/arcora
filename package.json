@@ -37,6 +37,7 @@
   "type": "module",
   "dependencies": {
     "mathjs": "^15.2.0",
+    "polygon-clipping": "^0.15.7",
     "uuid": "^13.0.2",
     "vite-tsconfig-paths": "^6.1.1"
   }

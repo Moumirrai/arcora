@@ -1,3 +1,5 @@
+import polygonClipping from 'polygon-clipping';
+
 export function plochaPodVektorem(x1: number, x2: number, y1: number, y2: number): number {
     return ((Math.abs(x1 - x2) * Math.abs(y1 - y2)) / 2) + (Math.abs(x1 - x2) * Math.min(Math.abs(y1), Math.abs(y2)));
 }
@@ -354,6 +356,90 @@ export class SpravceTeles {
     pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
 
+    // --- NOVÁ METODA PRO MODELOVÁNÍ TVARŮ (BOOLEAN OPERACE) ---
+    zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean): void {
+        // Knihovna polygon-clipping přijímá formát Polygon (Pole ringů, kde ring je pole bodů [x, y])
+        // První ring [0] je vždy vnější hranice.
+        const novyKruh = x_coords.map((x, i) => [x, y_coords[i]!] as [number, number]);
+        const formatNoveno = [novyKruh]; 
+
+        for (let i = 0; i < this.polygony.length; i++) {
+            const staryPoly = this.polygony[i]!;
+            
+            // Boolean operace obrysů děláme jen pro hlavní (kladná) tělesa.
+            // Záporné polygony (otvory) ignorujeme, ty si žijí vlastním životem pro statiku.
+            if (!staryPoly.kladne) continue;
+
+            const staryKruh = staryPoly.x_val.map((x, j) => [x, staryPoly.y_val[j]!] as [number, number]);
+            const formatStareho = [staryKruh];
+
+            // 1. Zjistíme, zda existuje jakýkoliv průnik
+            const prunik = polygonClipping.intersection([formatNoveno], [formatStareho]);
+            
+            if (prunik.length > 0) {
+                // Mají průnik! Nyní otestujeme, zda je nový tvar nakreslený ZCELA UVNITŘ
+                // (pokud z nového tvaru odečteme starý a nezbyde nic, znamená to, že ho starý tvar celý pohltil).
+                const zbytekZNoveno = polygonClipping.difference([formatNoveno], [formatStareho]);
+                const jeZcelaUvnitr = zbytekZNoveno.length === 0;
+
+                // --- A) OTVOR: Tvar je celý uvnitř a uživatel zvolil MÍNUS ---
+                if (jeZcelaUvnitr && !jeToPlus) {
+                    // Chováme se podle tvého návrhu: vytvoříme samostatný polygon s kladne = false.
+                    // Tím se nezmění obrys, ale tvá matematická část to odečte.
+                    this.polygony.push(new Polygon(x_coords, y_coords, false, ro, E));
+                    return; // Operace dokončena
+                }
+
+                // --- B) ČÁSTEČNÝ PRŮNIK (NEBO SLOUČENÍ UVNITŘ) ---
+                const stejnyMaterial = (staryPoly.E === E && staryPoly.ro === ro);
+
+                if (!stejnyMaterial) {
+                    throw new Error("Tvary s rozdílným materiálem se mohou překrývat pouze jako otvory (mínusem zcela uvnitř).");
+                }
+
+                let vysledekKnihovny: polygonClipping.MultiPolygon;
+
+                if (jeToPlus) {
+                    // SLOUČENÍ (+)
+                    vysledekKnihovny = polygonClipping.union([formatNoveno], [formatStareho]);
+                } else {
+                    // ODŘÍZNUTÍ (-)
+                    vysledekKnihovny = polygonClipping.difference([formatStareho], [formatNoveno]);
+                    
+                    if (vysledekKnihovny.length === 0) {
+                        // Tvar byl mínusem celý vymazán -> odstraníme ho z paměti
+                        this.polygony.splice(i, 1);
+                        return;
+                    }
+                }
+
+                // Aplikace výsledku zpět do objektů (ošetřuje i případ, kdy odřezání rozpůlí polygon na dva kusy)
+                for (let k = 0; k < vysledekKnihovny.length; k++) {
+                    const polygonZastupce = vysledekKnihovny[k]!;
+                    const vnejsiHranice = polygonZastupce[0]!; // Vnější ring
+                    
+                    const noveX = vnejsiHranice.map(p => p[0]);
+                    const noveY = vnejsiHranice.map(p => p[1]);
+
+                    if (k === 0) {
+                        // První tvar zaktualizuje náš existující polygon (objekty Vrchol se uvnitř přepíší na nová ID)
+                        staryPoly.update(noveX, noveY, true, ro, E);
+                    } else {
+                        // Pokud vznikly další kusy (rozpůlení), přidáme je jako zcela nové polygony
+                        this.polygony.push(new Polygon(noveX, noveY, true, ro, E));
+                    }
+                }
+                
+                return; // Operace dokončena, našli jsme cíl
+            }
+        }
+
+        // --- C) KRESLENÍ DO PRÁZDNA ---
+        // Pokud cyklus doběhl a nenašel se průnik se žádným tělesem, prostě vytvoříme nový.
+        // I když uživatel zmáčkl "mínus" mimo těleso, respektujeme to (vytvoří to fiktivní negativní plochu).
+        this.polygony.push(new Polygon(x_coords, y_coords, jeToPlus, ro, E));
+    }
+
     // Vypočet průsečíků všech přímek ze všech polygonů navzájem
     aktualizujPruseciky(): void {
         // Nejdříve vyprázdníme staré průsečíky
@@ -416,7 +502,7 @@ export class SpravceTeles {
         }
     }
 
-spocitejCelkove(): CelkoveCharakteristiky {
+    spocitejCelkove(): CelkoveCharakteristiky {
         // Vyfiltrujeme pouze polygony, které mají úspěšně spočítané výsledky
         const validniPolygony = this.polygony.filter(p => p.vysledky !== undefined);
 

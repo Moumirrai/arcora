@@ -378,7 +378,265 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     });
 });
 
+describe("Nehomogenní průřezy (Kombinace odlišných materiálů)", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+
+    it("1. Sendvičový průřez (Dva materiály nad sebou) - Posun neutrální osy k tužšímu", () => {
+        // Spodní část: Ocel (šířka 10, výška 2), E = 210 GPa, hustota 7850
+        // Fyzická plocha = 20, lokální těžiště y = 1
+        const ocel = new Polygon([0, 10, 10, 0], [0, 0, 2, 2], true, 7850, 210);
+        
+        // Horní část: Měkčí materiál (šířka 10, výška 8), E = 21 GPa (10x měkčí), hustota 500
+        // Fyzická plocha = 80, lokální těžiště y = 6
+        const drevo = new Polygon([0, 10, 10, 0], [2, 2, 10, 10], true, 500, 21);
+        
+        spravce.polygony.push(ocel, drevo);
+
+        // Nastavení referenčního modulu pružnosti na ocel
+        spravce.zvolene_E_ref = 210;
+        const vysledky = spravce.spocitejCelkove();
+
+        // Očekávané chování ideálního průřezu:
+        // Fyzická plocha celkem je 100, ale ideální se přepočítá přes poměr E
+        // A_id = 20*1 + 80*(21/210) = 20 + 8 = 28
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(10, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(10, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
+
+        // Těžiště by mělo být staženo dolů k tužšímu materiálu (oceli)
+        // Y_t_id = (20 * 1 + 8 * 6) / 28 = (20 + 48) / 28 = 68 / 28 ≈ 2.42857
+        expect(vysledky.teziste_x).toBeCloseTo(5, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(2.42857, 4);
+    });
+
+    it("2. Asymetrický průřez z různých materiálů (Vedle sebe) - Posun těžiště v ose X", () => {
+        // Levá část: Tužší materiál (např. E=200 GPa)
+        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 2.5
+        const levyTuhaCast = new Polygon([0, 5, 5, 0], [0, 0, 10, 10], true, 1.0, 200);
+        
+        // Pravá část: 4x měkčí materiál (E=50 GPa)
+        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 7.5
+        const pravaMekciCast = new Polygon([5, 10, 10, 5], [0, 0, 10, 10], true, 1.0, 50);
+        
+        spravce.polygony.push(levyTuhaCast, pravaMekciCast);
+
+        // Referenční E nastavíme na tužší materiál
+        spravce.zvolene_E_ref = 200; 
+        const vysledky = spravce.spocitejCelkove();
+
+        // Výpočet ideální plochy:
+        // A_id = 50 * (200/200) + 50 * (50/200) = 50 + 12.5 = 62.5
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
+
+        // Těžiště X se musí posunout doleva k tužšímu materiálu
+        // X_t_id = (50 * 2.5 + 12.5 * 7.5) / 62.5 = (125 + 93.75) / 62.5 = 218.75 / 62.5 = 3.5
+        expect(vysledky.teziste_x).toBeCloseTo(3.5, 5);
+        
+        // V ose Y jsou oba polygony stejné, těžiště musí zůstat přesně uprostřed
+        expect(vysledky.teziste_y).toBeCloseTo(5, 5);
+    });
+});
+
+describe("Testování průniků polygonů", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+
+    it("Dva čtverce přičteny přes sebe tvořící obdelník", () => {
+        
+        spravce.zpracujNovyTvar([0, 100, 100, 0], [0, 0, 100, 100], 1, 7850, true);
+        spravce.zpracujNovyTvar([0, 100, 100, 0], [50, 50, 150, 150], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(150, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(100, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(117.75, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(15000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(50, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(75, 4); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(28125000, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(12500000.00, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+
+        expect(vysledky.i_x).toBeCloseTo(43.30, 2);
+        expect(vysledky.i_y).toBeCloseTo(28.87, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(375000, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(375000, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(250000, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(250000, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 5);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(28125000.00, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(12500000.00, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(43.30, 2);
+        expect(vysledky.i_min).toBeCloseTo(28.87, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(375000, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(375000, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(250000, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(250000, 2);  
+    });
+
+    it("Dva čtverce odečteny přes sebe tvořící obdelník", () => {
+        
+        spravce.zpracujNovyTvar([0, 100, 100, 0], [0, 0, 100, 100], 1, 7850, true);
+        spravce.zpracujNovyTvar([0, 100, 100, 0], [50, 50, 150, 150], 1, 7850, false);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(50, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(100, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(39.25, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(5000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(50, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(25, 4); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(1041666.67, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(4166666.67, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+
+        expect(vysledky.i_x).toBeCloseTo(14.43, 2);
+        expect(vysledky.i_y).toBeCloseTo(28.87, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(41666.67, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(41666.67, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(83333.33, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(83333.33, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 5);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(4166666.67, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(1041666.67, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(28.87, 2);
+        expect(vysledky.i_min).toBeCloseTo(14.43, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(83333.33, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(83333.33, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(41666.67, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(41666.67, 2);  
+    });
+
+    it("Dva trojúhelníky přičteny přes sebe", () => {
+        
+        spravce.zpracujNovyTvar([0, 200, 200], [0, 0, 300], 1, 7850, true);
+        spravce.zpracujNovyTvar([30, 150, 150], [20, 500, 20], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(354.23, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(45125, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(126.63, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(154.19, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(537359268.72, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(80856188.44, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(45447777.68, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(109.12, 2);
+        expect(vysledky.i_y).toBeCloseTo(42.33, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(1553903.28, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(3485103.98, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(1102029.35, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(638524.52, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(5.63, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(541839905.28, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(76375551.88, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(109.58, 2);
+        expect(vysledky.i_min).toBeCloseTo(41.14, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(1564035.74, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(3266702.16, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(866485.40, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(688744.47, 2);  
+    });
+
+    it("Dva trojúhelníky přičteny přes sebe a jeden obdelník odečítající část hmoty z obou trojúhelníků", () => {
+        
+        spravce.zpracujNovyTvar([0, 200, 200], [0, 0, 300], 1, 7850, true);
+        spravce.zpracujNovyTvar([30, 150, 150], [20, 500, 20], 1, 7850, true);  
+        spravce.zpracujNovyTvar([250, 110, 110, 300], [0, 0, 300, 300], 1, 7850, false);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(150, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(157, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(20000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(92.08, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(171.17, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(356572777.78, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(20296527.78, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(69651388.89, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(133.52, 2);
+        expect(vysledky.i_y).toBeCloseTo(31.86, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(1084357.15, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(2083190.52, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(350443.65, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(220414.78, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(11.25, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(370428457.76, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(6440847.79, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(136.09, 2);
+        expect(vysledky.i_min).toBeCloseTo(17.95, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(1109686.02, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(1993230.91, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(126370.45, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(113160.03, 2);  
+    });
+});
+
+
 // zkusit random průřezy napříč kvadrantama a zadavaný proti směru hodinových ručiček (u toho checknout deviační moment)
+
+
+
+
+//-------------------------------------------------------- NAPĚTÍ ---------------------------------------------------
 
 
 
@@ -472,71 +730,6 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         expect(rovina.c).toBeCloseTo(4000000, 4);
     });
 });
-
-
-describe("Nehomogenní průřezy (Kombinace odlišných materiálů)", () => {
-    let spravce: SpravceTeles;
-
-    beforeEach(() => {
-        spravce = new SpravceTeles();
-    });
-
-    it("1. Sendvičový průřez (Dva materiály nad sebou) - Posun neutrální osy k tužšímu", () => {
-        // Spodní část: Ocel (šířka 10, výška 2), E = 210 GPa, hustota 7850
-        // Fyzická plocha = 20, lokální těžiště y = 1
-        const ocel = new Polygon([0, 10, 10, 0], [0, 0, 2, 2], true, 7850, 210);
-        
-        // Horní část: Měkčí materiál (šířka 10, výška 8), E = 21 GPa (10x měkčí), hustota 500
-        // Fyzická plocha = 80, lokální těžiště y = 6
-        const drevo = new Polygon([0, 10, 10, 0], [2, 2, 10, 10], true, 500, 21);
-        
-        spravce.polygony.push(ocel, drevo);
-
-        // Nastavení referenčního modulu pružnosti na ocel
-        spravce.zvolene_E_ref = 210;
-        const vysledky = spravce.spocitejCelkove();
-
-        // Očekávané chování ideálního průřezu:
-        // Fyzická plocha celkem je 100, ale ideální se přepočítá přes poměr E
-        // A_id = 20*1 + 80*(21/210) = 20 + 8 = 28
-        expect(vysledky.celkova_vyska_h).toBeCloseTo(10, 5);
-        expect(vysledky.celkova_sirka_b).toBeCloseTo(10, 5);
-        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
-
-        // Těžiště by mělo být staženo dolů k tužšímu materiálu (oceli)
-        // Y_t_id = (20 * 1 + 8 * 6) / 28 = (20 + 48) / 28 = 68 / 28 ≈ 2.42857
-        expect(vysledky.teziste_x).toBeCloseTo(5, 5);
-        expect(vysledky.teziste_y).toBeCloseTo(2.42857, 4);
-    });
-
-    it("2. Asymetrický průřez z různých materiálů (Vedle sebe) - Posun těžiště v ose X", () => {
-        // Levá část: Tužší materiál (např. E=200 GPa)
-        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 2.5
-        const levyTuhaCast = new Polygon([0, 5, 5, 0], [0, 0, 10, 10], true, 1.0, 200);
-        
-        // Pravá část: 4x měkčí materiál (E=50 GPa)
-        // Šířka 5, výška 10 -> Plocha = 50, lokální těžiště x = 7.5
-        const pravaMekciCast = new Polygon([5, 10, 10, 5], [0, 0, 10, 10], true, 1.0, 50);
-        
-        spravce.polygony.push(levyTuhaCast, pravaMekciCast);
-
-        // Referenční E nastavíme na tužší materiál
-        spravce.zvolene_E_ref = 200; 
-        const vysledky = spravce.spocitejCelkove();
-
-        // Výpočet ideální plochy:
-        // A_id = 50 * (200/200) + 50 * (50/200) = 50 + 12.5 = 62.5
-        expect(vysledky.vysledna_plocha).toBeCloseTo(100, 5);
-
-        // Těžiště X se musí posunout doleva k tužšímu materiálu
-        // X_t_id = (50 * 2.5 + 12.5 * 7.5) / 62.5 = (125 + 93.75) / 62.5 = 218.75 / 62.5 = 3.5
-        expect(vysledky.teziste_x).toBeCloseTo(3.5, 5);
-        
-        // V ose Y jsou oba polygony stejné, těžiště musí zůstat přesně uprostřed
-        expect(vysledky.teziste_y).toBeCloseTo(5, 5);
-    });
-});
-
 
 describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejRovniceNapeti", () => {
     let spravce: SpravceTeles;
