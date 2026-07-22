@@ -24,7 +24,7 @@ const SparseSystem = struct {
     N: ?csparse.csn, // numeric factorization
 };
 
-var systems: [max_systems]?*SparseSystem = [_]?*SparseSystem{null} ** max_systems;
+var systems: [max_systems]?*SparseSystem = @splat(null);
 
 fn getSystem(handle: i32) ?*SparseSystem {
     if (handle < 0 or handle >= max_systems) return null;

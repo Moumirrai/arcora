@@ -1,10 +1,11 @@
 import { Node } from "./entities/node";
 import { Element } from "./entities/element";
 import { Material } from "./valueProps/material";
+import { ElementsMap } from "./entities/element";
 
 export class Model {
   public readonly nodes: Map<string, Node> = new Map();
-  public readonly elements: Map<string, Element> = new Map();
+  public readonly elements: ElementsMap = new ElementsMap(this);
   public readonly materials: Map<string, Material> = new Map();
 
   public dirty = false;

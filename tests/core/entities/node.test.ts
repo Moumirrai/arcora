@@ -9,7 +9,7 @@ const UUID_V4_REGEX =
 const modelMock = {} as Model; // Mock model since Node requires it
 
 describe("Node class", () => {
-  it("generates a uuid v4 id when none provided", () => {
+  it("generates a uuid id when none provided", () => {
     const node = new Node(modelMock, { coords: { x: 1, z: 2 } });
     expect(typeof node.id).toBe("string");
     expect(node.id.length).toBeGreaterThan(0);

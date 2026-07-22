@@ -1,6 +1,7 @@
 import type { Model } from "@arcora/core/model";
+import type { TransactionChanges } from "./changes";
 
 export interface IOperation {
-  do(model: Model): boolean; // returns true if the operation was successful
-  undo(model: Model): boolean;
+  do(model: Model, changes: TransactionChanges): void | Error;
+  undo(model: Model, changes: TransactionChanges): void | Error;
 }

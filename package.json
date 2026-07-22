@@ -1,44 +1,54 @@
 {
-  "name": "arcora",
-  "version": "0.0.1",
+  "name": "@stabilora/arcora",
+  "version": "0.0.2",
   "author": "Moumirrai",
-  "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Moumirrai/arcora.git"
+  },
+  "main": "dist/index.mjs",
   "module": "src/index.ts",
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@typescript-eslint/eslint-plugin": "^8.60.0",
-    "@typescript-eslint/parser": "^8.60.0",
-    "@vitest/ui": "^4.1.7",
-    "eslint": "^9.39.4",
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
+    "eslint": "^10.4.1",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^16.5.0",
+    "globals": "^17.6.0",
     "prettier": "^3.8.3",
-    "tsdown": "^0.18.4",
-    "typescript-eslint": "^8.60.0",
-    "vitest": "^4.1.10"
+    "tsdown": "^0.22.2",
+    "typescript-eslint": "^8.61.0",
+    "vitest": "^4.1.10",
+    "mathjs": "^15.2.0"
   },
   "peerDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   },
+  "exports": {
+    "import": "./dist/index.mjs",
+    "types": "./dist/index.d.mts"
+  },
+  "description": "Finite Element Method engine for structural analysis, written in TypeScript",
+  "files": [
+    "dist/",
+    "src/"
+  ],
   "license": "MIT",
-  "private": true,
   "scripts": {
     "wasm:dev": "cd zig && zig build",
     "wasm:dist": "cd zig && zig build --prefix ../dist",
     "build:js": "tsdown",
     "build": "bun run build:js && bun run wasm:dist",
+    "prepublishOnly": "bun run build",
     "test": "bun run wasm:dev && vitest",
-    "test-ui": "bun run wasm:dev && vitest --ui",
     "bench": "bun run wasm:dev && vitest bench",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "check": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" && eslint src/**/*.ts && bun run wasm:dev && vitest run"
   },
   "type": "module",
+  "types": "dist/index.d.mts",
   "dependencies": {
-    "mathjs": "^15.2.0",
-    "polygon-clipping": "^0.15.7",
-    "uuid": "^13.0.2",
-    "vite-tsconfig-paths": "^6.1.1"
+    "polygon-clipping": "^0.15.7"
   }
 }

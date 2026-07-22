@@ -1,26 +1,69 @@
 import type { Model } from "../core/model";
 import type { Transaction } from "./Transaction";
+import { createTransactionChanges, type TransactionChanges } from "./changes";
+
+export type TransactionChangeListener = (changes: TransactionChanges) => void;
 
 export class ModelRepository {
-  private _undoStack: Transaction[] = [];
-  private _redoStack: Transaction[] = [];
+  #undoStack: Transaction[] = [];
+  #redoStack: Transaction[] = [];
+  #listeners: Set<TransactionChangeListener> = new Set();
+  #model: Model;
+  #maxUndoHistory: number = 100;
 
-  constructor(
-    private model: Model,
-    private undoHistory: number = 50
-  ) {}
+  constructor(model: Model, undoHistory?: number) {
+    this.#model = model;
+    this.#maxUndoHistory = undoHistory ?? 100;
+  }
+
+  public onChange(listener: TransactionChangeListener): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  get undoStack(): Transaction[] {
+    return [...this.#undoStack];
+  }
+
+  get redoStack(): Transaction[] {
+    return [...this.#redoStack];
+  }
+
+  private emitChange(changes: TransactionChanges): void {
+    for (const listener of this.#listeners) {
+      listener(changes);
+    }
+  }
+
+  public apply(transaction: Transaction): void {
+    const changes = createTransactionChanges();
+    const success = transaction.do(this.#model, changes);
+
+    // TODO: propagate error to caller instead of silently logging
+    if (!success) {
+      console.error("transaction apply failed");
+      return;
+    }
+
+    this.emitChange(changes);
+  }
 
   public commit(transaction: Transaction): void {
-    const success = transaction.do(this.model);
+    const changes = createTransactionChanges();
+    const success = transaction.do(this.#model, changes);
 
     if (!success) {
       console.error("transaction do failed");
       return;
     }
 
-    this._undoStack.push(transaction); //add transaction to end of undo stack
-    if (this._undoStack.length > this.undoHistory) this._undoStack.shift(); //if max history exceeded, remove first element
-    this._redoStack = []; //clear redo stack
+    this.#undoStack.push(transaction);
+    if (this.#undoStack.length > this.#maxUndoHistory) this.#undoStack.shift();
+    this.#redoStack = [];
+
+    this.emitChange(changes);
   }
 
   public undo(count: number = 1): void {
@@ -29,21 +72,23 @@ export class ModelRepository {
       return;
     }
 
-    if (this._undoStack.length < count) {
+    if (this.#undoStack.length < count) {
       console.error("Undo stack out of bounds");
       return;
     }
 
     for (let i = 0; i < count; i++) {
-      const transaction = this._undoStack.pop()!;
-      const success = transaction.undo(this.model);
+      const transaction = this.#undoStack.pop()!;
+      const changes = createTransactionChanges();
+      const success = transaction.undo(this.#model, changes);
 
       if (!success) {
         console.error("transaction undo failed");
         return;
       }
 
-      this._redoStack.push(transaction);
+      this.#redoStack.push(transaction);
+      this.emitChange(changes);
     }
   }
 
@@ -53,24 +98,27 @@ export class ModelRepository {
       return;
     }
 
-    if (this._redoStack.length < count) {
+    if (this.#redoStack.length < count) {
       console.error("Redo stack out of bounds");
       return;
     }
 
     for (let i = 0; i < count; i++) {
-      const transaction = this._redoStack.pop()!;
-      const success = transaction.do(this.model);
+      const transaction = this.#redoStack.pop()!;
+      const changes = createTransactionChanges();
+      const success = transaction.do(this.#model, changes);
 
       if (!success) {
         console.error("transaction redo (do) failed");
         return;
       }
 
-      // push the redone transaction back onto the undo stack
-      this._undoStack.push(transaction);
-      // ensure undo history limit
-      if (this._undoStack.length > this.undoHistory) this._undoStack.shift();
+      this.#undoStack.push(transaction);
+      if (this.#undoStack.length > this.#maxUndoHistory) {
+        this.#undoStack.shift();
+      }
+
+      this.emitChange(changes);
     }
   }
 }
