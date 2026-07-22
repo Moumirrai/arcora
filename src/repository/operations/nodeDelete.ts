@@ -7,6 +7,7 @@ import { RemoveElementOperation } from "./elementDelete";
 export class RemoveNodeOperation implements IOperation {
   #nodeData?: NodeData;
   #elementOps: RemoveElementOperation[] = [];
+  #skipped = false;
 
   constructor(public readonly id: string) {}
 
@@ -23,6 +24,10 @@ export class RemoveNodeOperation implements IOperation {
 
     const node = model.nodes.get(this.id);
     if (!node) {
+      if (changes.removed.has(this.id)) {
+        this.#skipped = true;
+        return;
+      }
       return new Error(`RemoveNodeOperation: Node "${this.id}" does not exist`);
     }
 
@@ -44,6 +49,9 @@ export class RemoveNodeOperation implements IOperation {
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (!this.#nodeData) {
+      if (this.#skipped) {
+        return;
+      }
       return new Error(
         `RemoveNodeOperation: No record of node "${this.id}" to undo`
       );

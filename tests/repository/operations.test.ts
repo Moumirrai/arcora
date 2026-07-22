@@ -117,6 +117,36 @@ describe("RemoveNodeOperation", () => {
     expect(emitted).toBe(false);
     expect(model.nodes.size).toBe(0);
   });
+
+  it("succeeds when node and its connected element are both in the transaction", () => {
+    const model = new Model();
+    const repo = new ModelRepository(model);
+
+    const [nodeA, nodeB] = makeTwoNodes(repo);
+    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const elTxn = new Transaction("Add element");
+    elTxn.addCommand(elOp);
+    repo.commit(elTxn);
+    expect(model.elements.size).toBe(1);
+
+    const delTxn = new Transaction("Delete selection");
+    delTxn.addCommand(new RemoveNodeOperation(nodeA.id));
+    delTxn.addCommand(new RemoveElementOperation(elOp.id));
+    repo.commit(delTxn);
+
+    expect(model.nodes.size).toBe(1);
+    expect(model.nodes.has(nodeA.id)).toBe(false);
+    expect(model.elements.size).toBe(0);
+
+    repo.undo();
+    expect(model.nodes.size).toBe(2);
+    expect(model.nodes.has(nodeA.id)).toBe(true);
+    expect(model.elements.size).toBe(1);
+
+    repo.redo();
+    expect(model.nodes.size).toBe(1);
+    expect(model.elements.size).toBe(0);
+  });
 });
 
 describe("AddElementOperation", () => {

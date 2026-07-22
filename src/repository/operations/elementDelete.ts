@@ -5,6 +5,7 @@ import { Element, type ElementData } from "../../core/entities/element";
 
 export class RemoveElementOperation implements IOperation {
   #elementData?: ElementData;
+  #skipped = false;
 
   constructor(public readonly id: string) {}
 
@@ -20,6 +21,10 @@ export class RemoveElementOperation implements IOperation {
 
     const element = model.elements.get(this.id);
     if (!element) {
+      if (changes.removed.has(this.id)) {
+        this.#skipped = true;
+        return;
+      }
       return new Error(
         `RemoveElementOperation: Element "${this.id}" does not exist`
       );
@@ -36,6 +41,9 @@ export class RemoveElementOperation implements IOperation {
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (!this.#elementData) {
+      if (this.#skipped) {
+        return;
+      }
       return new Error(
         `RemoveElementOperation: No record of element "${this.id}" to undo`
       );
