@@ -31,16 +31,23 @@ function generateBandedSPD(
   // Build dense first to accumulate correctly
   const dense: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
 
+  // Start from identity-like shift to keep matrix strictly positive on diagonal
   for (let i = 0; i < n; i++) {
-    let diag = 0;
+    dense[i]![i] = 1;
+  }
+
+  // Add symmetric band edges and increase both endpoint diagonals.
+  // This keeps A symmetric and diagonally dominant (SPD for this construction).
+  for (let i = 0; i < n; i++) {
     for (let k = 1; k <= bandwidth; k++) {
-      if (i + k < n) {
-        dense[i]![i + k] = -1;
-        dense[i + k]![i] = -1;
-        diag += 2;
+      const j = i + k;
+      if (j < n) {
+        dense[i]![j] = -1;
+        dense[j]![i] = -1;
+        dense[i]![i]! += 1;
+        dense[j]![j]! += 1;
       }
     }
-    dense[i]![i] = diag + 1;
   }
 
   // Extract triplets from dense for WASM
@@ -97,7 +104,7 @@ triplets.forEach(([r, c, v], i) => {
 // First solve to factorize K (shape+k dirty)
 const b0 = new Float64Array(memory.buffer, systemBPtr(handle), N);
 b0.set(rhsVectors[0]!);
-systemSolve(handle, true, true, true);
+systemSolve(handle, true, true);
 
 // math.js: pre-build matrix once, lusolve re-factorizes each call
 const mjsRhs = rhsVectors.map((v) => Array.from(v));
@@ -110,7 +117,7 @@ describe(`Sparse solve n=${N}`, () => {
   bench("WASM Cholesky (f_dirty only)", () => {
     const b = new Float64Array(memory.buffer, systemBPtr(handle), N);
     b.set(rhsVectors[idx % B_COUNT]!);
-    systemSolve(handle, false, false, true);
+    systemSolve(handle, false, true);
     idx++;
   });
 
