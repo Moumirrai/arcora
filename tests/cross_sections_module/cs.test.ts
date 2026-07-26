@@ -373,8 +373,33 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
         expect(vysledky.W_min_l).toBeCloseTo(10000, 2);  
     });
     
-    it("4. Kontrola pádu při prázdném zadání", () => {
-        expect(() => spravce.spocitejCelkove()).toThrowError("Nejdříve zadejte alespoň jeden platný polygon.");
+    it("4. Kontrola 0 hodnot při prázdném zadání", () => {
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(0, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(0, 5);
+        expect(vysledky.vysledna_plocha).toBeCloseTo(0, 5);
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(0, 2);
+        expect(vysledky.teziste_x).toBeCloseTo(0, 5);
+        expect(vysledky.teziste_y).toBeCloseTo(0, 5);
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(0, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(0, 2);
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 5);
+        expect(vysledky.i_x).toBeCloseTo(0, 2);
+        expect(vysledky.i_y).toBeCloseTo(0, 2);
+        expect(vysledky.W_x_h).toBeCloseTo(0, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(0, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(0, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(0, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 5);
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(0, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(0, 2);
+        expect(vysledky.i_max).toBeCloseTo(0, 2);
+        expect(vysledky.i_min).toBeCloseTo(0, 2);
+        expect(vysledky.W_max_h).toBeCloseTo(0, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(0, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(0, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(0, 2);  
     });
 });
 
@@ -817,8 +842,8 @@ describe("Testování průniků polygonů", () => {
         spravce.zvolene_E_ref = 1;
         const vysledky = spravce.spocitejCelkove();
 
-        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
-        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(0, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(0, 5);
         
         expect(vysledky.celkova_hmotnost).toBeCloseTo(0, 2);
 
@@ -930,7 +955,7 @@ describe("Testování průniků polygonů", () => {
         expect(vysledky.W_y_p).toBeCloseTo(10000000, 2);
         expect(vysledky.W_y_l).toBeCloseTo(10000000, 2);
 
-        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 2);
 
         expect(vysledky.vysledny_moment_max).toBeCloseTo(2000000000, 2); 
         expect(vysledky.vysledny_moment_min).toBeCloseTo(2000000000, 2);
@@ -942,6 +967,51 @@ describe("Testování průniků polygonů", () => {
         expect(vysledky.W_max_d).toBeCloseTo(10000000, 2);
         expect(vysledky.W_min_p).toBeCloseTo(10000000, 2);
         expect(vysledky.W_min_l).toBeCloseTo(10000000, 2);  
+    });
+
+    it("Dva polygony s odlišným materialem vedle sebe", () => {
+        
+        spravce.zpracujNovyTvar([0, 0, 400, 400], [400, 500, 500, 400], 170, 7850, true);
+        spravce.zpracujNovyTvar([0, 400, 400, 0], [0, 0, 400, 400], 40, 7850, true);
+
+        spravce.zvolene_E_ref = 40;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(400, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(1570, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(200000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(200, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(328.79, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(7426515151.52, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(4400000000.00, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(150.02, 2);
+        expect(vysledky.i_y).toBeCloseTo(115.47, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(43376106.19, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(22587557.60, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(22000000.00, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(22000000.00, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(7426515151.52, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(4400000000.00, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(150.02, 2);
+        expect(vysledky.i_min).toBeCloseTo(115.47, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(43376106.19, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(22587557.60, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(22000000.00, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(22000000.00, 2);  
     });
 });
 

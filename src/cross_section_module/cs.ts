@@ -377,20 +377,28 @@ export class SpravceTeles {
             const prunik = polygonClipping.intersection([formatNoveno], [formatStareho]);
             
             if (prunik.length > 0) {
-                // Mají průnik! Nyní otestujeme, zda je nový tvar nakreslený ZCELA UVNITŘ
-                // (pokud z nového tvaru odečteme starý a nezbyde nic, znamená to, že ho starý tvar celý pohltil).
+                // 1. Zjistíme, zda je nový tvar nakreslený ZCELA UVNITŘ
                 const zbytekZNoveno = polygonClipping.difference([formatNoveno], [formatStareho]);
                 const jeZcelaUvnitr = zbytekZNoveno.length === 0;
 
-                // --- A) OTVOR: Tvar je celý uvnitř a uživatel zvolil MÍNUS ---
-                if (jeZcelaUvnitr && !jeToPlus) {
-                    // Chováme se podle tvého návrhu: vytvoříme samostatný polygon s kladne = false.
-                    // Tím se nezmění obrys, ale tvá matematická část to odečte.
-                    this.polygony.push(new Polygon(x_coords, y_coords, false, ro, E));
+                // --- PŘIDÁNO: Zjistíme, zda minusový tvar ZCELA VYMAZAL starý tvar ---
+                const zbytekZeStareho = polygonClipping.difference([formatStareho], [formatNoveno]);
+                const smazanoCele = zbytekZeStareho.length === 0;
+
+                // A) ÚPLNÉ VYMAZÁNÍ (MÍNUS): Nový tvar smazal ten starý
+                if (smazanoCele && !jeToPlus) {
+                    // Polygon kompletně odstraníme z paměti (i jeho ID zmizí)
+                    this.polygony.splice(i, 1);
                     return; // Operace dokončena
                 }
 
-                // --- B) ČÁSTEČNÝ PRŮNIK (NEBO SLOUČENÍ UVNITŘ) ---
+                // B) OTVOR (MÍNUS): Tvar je celý uvnitř, ale starý polygon stále existuje
+                if (jeZcelaUvnitr && !jeToPlus) {
+                    this.polygony.push(new Polygon(x_coords, y_coords, false, ro, E));
+                    return; 
+                }
+
+                // --- zbytek kódu pokračuje stejně (C - ČÁSTEČNÝ PRŮNIK atd.) ---
                 const stejnyMaterial = (staryPoly.E === E && staryPoly.ro === ro);
 
                 if (!stejnyMaterial) {
@@ -422,22 +430,39 @@ export class SpravceTeles {
                     const noveY = vnejsiHranice.map(p => p[1]);
 
                     if (k === 0) {
-                        // První tvar zaktualizuje náš existující polygon (objekty Vrchol se uvnitř přepíší na nová ID)
+                        // První tvar zaktualizuje náš existující polygon
                         staryPoly.update(noveX, noveY, true, ro, E);
                     } else {
                         // Pokud vznikly další kusy (rozpůlení), přidáme je jako zcela nové polygony
                         this.polygony.push(new Polygon(noveX, noveY, true, ro, E));
                     }
+
+                    // --- NOVÁ ČÁST: DETEKCE A ULOŽENÍ OTVORŮ ---
+                    // Pokud uzavřením tvaru vznikla díra, knihovna ji vrátí na indexech 1 a výše
+                    for (let h = 1; h < polygonZastupce.length; h++) {
+                        const diraHranice = polygonZastupce[h]!;
+                        const diraX = diraHranice.map(p => p[0]);
+                        const diraY = diraHranice.map(p => p[1]);
+                        
+                        // Díru uložíme přímo jako záporný polygon!
+                        // Bude fungovat úplně stejně, jako kdyby ji uživatel nakreslil ručně s MÍNUSEM.
+                        this.polygony.push(new Polygon(diraX, diraY, false, ro, E));
+                    }
                 }
-                
                 return; // Operace dokončena, našli jsme cíl
             }
         }
 
         // --- C) KRESLENÍ DO PRÁZDNA ---
-        // Pokud cyklus doběhl a nenašel se průnik se žádným tělesem, prostě vytvoříme nový.
-        // I když uživatel zmáčkl "mínus" mimo těleso, respektujeme to (vytvoří to fiktivní negativní plochu).
-        this.polygony.push(new Polygon(x_coords, y_coords, jeToPlus, ro, E));
+        // Pokud cyklus doběhl a nenašel se průnik se žádným tělesem, 
+        // znamená to, že uživatel kreslí úplně mimo existující polygony.
+        
+        if (jeToPlus) {
+            // když je polygon plus mimo všechny tak se přidá jakonový
+            this.polygony.push(new Polygon(x_coords, y_coords, true, ro, E));
+        } else {
+            // když je polygon mínus mimo všechny tak se (nikdy) nic nestane 
+        }
     }
 
     // Vypočet průsečíků všech přímek ze všech polygonů navzájem
@@ -507,7 +532,34 @@ export class SpravceTeles {
         const validniPolygony = this.polygony.filter(p => p.vysledky !== undefined);
 
         if (validniPolygony.length === 0) {
-            throw new Error("Nejdříve zadejte alespoň jeden platný polygon.");
+            return {
+                vysledna_plocha: 0,
+                vysledna_plocha_id: 0,
+                celkova_hmotnost: 0,
+                celkova_vyska_h: 0,
+                celkova_sirka_b: 0,
+                teziste_x: 0,
+                teziste_y: 0,
+                vysledny_moment_x: 0,
+                vysledny_moment_y: 0,
+                vysledny_dev_moment: 0,
+                alfa_rad: 0,
+                alfa_deg: 0,
+                vysledny_moment_max: 0,
+                vysledny_moment_min: 0,
+                W_x_h: 0,
+                W_x_d: 0,
+                W_y_p: 0,
+                W_y_l: 0,
+                W_max_h: 0,
+                W_max_d: 0,
+                W_min_p: 0,
+                W_min_l: 0,
+                i_x: 0,
+                i_y: 0,
+                i_max: 0,
+                i_min: 0
+            };
         }
 
         // --- 1. CELKOVÁ PLOCHA A HMOTNOST ---
