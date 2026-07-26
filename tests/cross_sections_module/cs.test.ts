@@ -628,6 +628,321 @@ describe("Testování průniků polygonů", () => {
         expect(vysledky.W_min_p).toBeCloseTo(126370.45, 2);
         expect(vysledky.W_min_l).toBeCloseTo(113160.03, 2);  
     });
+
+    it("Vytvoření obdelníkového otvoru v trojuhelníkovém polygonu", () => {
+        
+        spravce.zpracujNovyTvar([-100, 250, 400], [10, -250, 500], 1, 1, true);
+        spravce.zpracujNovyTvar([50, 200, 200, 50], [50, 50, 100, 100], 1, 1, false);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(750, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(500, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(0.14, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(143250, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(186.39, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(87.28, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(3641325719.90, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(1613142997.38, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(1110597349.48, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(159.43, 2);
+        expect(vysledky.i_y).toBeCloseTo(106.12, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(8822697.10, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(10796231.18, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(7551723.35, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(5632729.66, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(23.80, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(4131165128.87, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(1123303588.41, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(169.82, 2);
+        expect(vysledky.i_min).toBeCloseTo(88.55, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(8906694.60, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(14601697.00, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(5780948.38, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(4866010.80, 2);  
+    });
+
+    it("Přičítání nového polygonu do obdelníkového polygonu (plus v plusu)", () => {
+        
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
+        spravce.zpracujNovyTvar([200, 250, 250, 200], [50, 50, 100, 100], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(785, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(200, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(250, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(2083333333.33, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_y).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(3333333.33, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(2083333333.33, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_min).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(3333333.33, 2);  
+    });
+
+    it("Přičítání nového polygonu do stejného polygonu (plus v plusu 2)", () => {
+        
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(785, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(200, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(250, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(2083333333.33, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_y).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(3333333.33, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(2083333333.33, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_min).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(3333333.33, 2);  
+    });
+
+    it("Odečítání nového polygonu mimo první polygon", () => {
+        
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
+        spravce.zpracujNovyTvar([1000, 1300, 1300, 1000], [0, 0, 500, 500], 1, 7850, false);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(785, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(100000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(200, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(250, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(2083333333.33, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_y).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(3333333.33, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(2083333333.33, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(333333333.33, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(144.34, 2);
+        expect(vysledky.i_min).toBeCloseTo(57.74, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(8333333.33, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(3333333.33, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(3333333.33, 2);  
+    });
+
+    it("Odečítání nového polygonu, který je stejný jako polygon první", () => {
+        
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
+        spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, false);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(200, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(0, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(0, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(0, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(0, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(0, 2);
+        expect(vysledky.i_y).toBeCloseTo(0, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(0, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(0, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(0, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(0, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(0, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(0, 2);
+        expect(vysledky.i_min).toBeCloseTo(0, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(0, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(0, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(0, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(0, 2);  
+    });
+
+    it("Vytvoření společné množiny plygonů bez jediného vrcholu v této množině (kříž)", () => {
+        
+        spravce.zpracujNovyTvar([0, 300, 300, 0], [100, 100, 200, 200], 1, 7850, true);
+        spravce.zpracujNovyTvar([100, 200, 200, 100], [0, 0, 300, 300], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(300, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(300, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(392.50, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(50000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(150, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(150, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(241666666.67, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(241666666.67, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(69.52, 2);
+        expect(vysledky.i_y).toBeCloseTo(69.52, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(1611111.11, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(90, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(241666666.67, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(241666666.67, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(69.52, 2);
+        expect(vysledky.i_min).toBeCloseTo(69.52, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(1611111.11, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(1611111.11, 2);  
+    });
+
+    it("Vytvoření otvoru přičtením dvu polygonů (uzavření tvaru C)", () => {
+        
+        spravce.zpracujNovyTvar([0, 400, 400, 100, 100, 400, 400, 0], [0, 0, 100, 100, 300, 300, 400, 400], 1, 7850, true);
+        spravce.zpracujNovyTvar([300, 400, 400, 300], [0, 0, 400, 400], 1, 7850, true);
+
+        spravce.zvolene_E_ref = 1;
+        const vysledky = spravce.spocitejCelkove();
+
+        expect(vysledky.celkova_vyska_h).toBeCloseTo(400, 5);
+        expect(vysledky.celkova_sirka_b).toBeCloseTo(400, 5);
+        
+        expect(vysledky.celkova_hmotnost).toBeCloseTo(942.00, 2);
+
+        expect(vysledky.vysledna_plocha).toBeCloseTo(120000, 5);
+
+        expect(vysledky.teziste_x).toBeCloseTo(200, 2);
+        expect(vysledky.teziste_y).toBeCloseTo(200, 2); 
+
+        expect(vysledky.vysledny_moment_x).toBeCloseTo(2000000000.00, 2);
+        expect(vysledky.vysledny_moment_y).toBeCloseTo(2000000000.00, 2);
+
+        expect(vysledky.vysledny_dev_moment).toBeCloseTo(0, 2);
+
+        expect(vysledky.i_x).toBeCloseTo(129.10, 2);
+        expect(vysledky.i_y).toBeCloseTo(129.10, 2);
+
+        expect(vysledky.W_x_h).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_x_d).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_y_p).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_y_l).toBeCloseTo(10000000, 2);
+
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
+
+        expect(vysledky.vysledny_moment_max).toBeCloseTo(2000000000, 2); 
+        expect(vysledky.vysledny_moment_min).toBeCloseTo(2000000000, 2);
+
+        expect(vysledky.i_max).toBeCloseTo(129.10, 2);
+        expect(vysledky.i_min).toBeCloseTo(129.10, 2);
+
+        expect(vysledky.W_max_h).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_max_d).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_min_p).toBeCloseTo(10000000, 2);
+        expect(vysledky.W_min_l).toBeCloseTo(10000000, 2);  
+    });
 });
 
 
