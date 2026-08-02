@@ -1049,12 +1049,12 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
-        expect(vysledky.length).toBe(1);
-        const rovina = vysledky[0]!;
+        expect(vysledky.rovnice.length).toBe(1);
+        const rovina = vysledky.rovnice[0]!;
 
-        expect(rovina.a).toBeCloseTo(0, 4);    // x-ová složka sklonu
-        expect(rovina.b).toBeCloseTo(0, 4);    // y-ová složka sklonu
-        expect(rovina.c).toBeCloseTo(1000000000, 4); // posun (konstanta)
+        expect(rovina.a_plane).toBeCloseTo(0, 4);    // x-ová složka sklonu
+        expect(rovina.b_plane).toBeCloseTo(0, 4);    // y-ová složka sklonu
+        expect(rovina.c_plane).toBeCloseTo(1000000000, 4); // posun (konstanta)
     });
 
     it("2. Rovnoměrné plošné zatížení (Konstantní tlak)", () => {
@@ -1068,11 +1068,11 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovina = vysledky[0]!;
+        const rovina = vysledky.rovnice[0]!;
 
-        expect(rovina.a).toBeCloseTo(0, 4);
-        expect(rovina.b).toBeCloseTo(0, 4);
-        expect(rovina.c).toBeCloseTo(1000, 4);
+        expect(rovina.a_plane).toBeCloseTo(0, 4);
+        expect(rovina.b_plane).toBeCloseTo(0, 4);
+        expect(rovina.c_plane).toBeCloseTo(1000, 4);
     });
 
     it("3. Excentrický tlak (Ohyb kolem osy X)", () => {
@@ -1087,12 +1087,12 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovina = vysledky[0]!;
+        const rovina = vysledky.rovnice[0]!;
 
         // Očekáváme z = 0x + 3000y - 2000
-        expect(rovina.a).toBeCloseTo(0, 4);
-        expect(rovina.b).toBeCloseTo(3000000000, 4);
-        expect(rovina.c).toBeCloseTo(-2000000000, 4);
+        expect(rovina.a_plane).toBeCloseTo(0, 4);
+        expect(rovina.b_plane).toBeCloseTo(3000000000, 4);
+        expect(rovina.c_plane).toBeCloseTo(-2000000000, 4);
     });
 
     it("4. Liniové zatížení po spodní hraně (Excentricita v ose Y)", () => {
@@ -1108,11 +1108,11 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovina = vysledky[0]!;
+        const rovina = vysledky.rovnice[0]!;
 
-        expect(rovina.a).toBeCloseTo(0, 4);
-        expect(rovina.b).toBeCloseTo(-3000000, 4);
-        expect(rovina.c).toBeCloseTo(4000000, 4);
+        expect(rovina.a_plane).toBeCloseTo(0, 4);
+        expect(rovina.b_plane).toBeCloseTo(-3000000, 4);
+        expect(rovina.c_plane).toBeCloseTo(4000000, 4);
     });
 });
 
@@ -1138,19 +1138,19 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        expect(vysledky.length).toBe(2);
+        expect(vysledky.rovnice.length).toBe(2);
         
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
         // A_id = 4000 mm2. N = 40000 N. Napětí referenčního = 10 MPa (10 000 000)
-        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.c).toBeCloseTo(10000000, 4);
+        expect(rovinaPoly1.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.c_plane).toBeCloseTo(10000000, 4);
 
-        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.c).toBeCloseTo(5000000, 4);
+        expect(rovinaPoly2.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.c_plane).toBeCloseTo(5000000, 4);
     });
 
     it("2. Excentrický tlak (Ohyb) - Rovina napětí má odlišný sklon pro každý materiál", () => {
@@ -1161,16 +1161,16 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(324324.324, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(1891891.892, 3); // 10 000 000 - (324324.324 * 25)
+        expect(rovinaPoly1.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(324324.324, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(1891891.892, 3); // 10 000 000 - (324324.324 * 25)
 
-        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(162162.162, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(945945.946, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(162162.162, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(945945.946, 3); 
     });
 
     it("3. Liniové zatížení", () => {
@@ -1181,17 +1181,17 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
         // Náhradní síla F = 100 N v těžišti. c = F / A_id_m2 = 100 / 0.004 = 25000
-        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(0, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(25000, 3); 
+        expect(rovinaPoly1.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(0, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(25000, 3); 
 
-        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(0, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(12500, 3);  
+        expect(rovinaPoly2.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(0, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(12500, 3);  
     });
 
     it("4. Plošné zatížení", () => {
@@ -1202,16 +1202,16 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(-3.24324, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(31.081, 3); // -50 - (-3.24324 * 25) = 31.081
+        expect(rovinaPoly1.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(-3.24324, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(31.081, 3); // -50 - (-3.24324 * 25) = 31.081
 
-        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(-1.6216, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(15.5405, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(-1.6216, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(15.5405, 3); 
     });
 
     it("5. Necentrické zatížení", () => {
@@ -1222,16 +1222,16 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(360, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(-364.86486, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(-16378.3783, 3); 
+        expect(rovinaPoly1.a_plane).toBeCloseTo(360, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(-364.86486, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(-16378.3783, 3); 
 
-        expect(rovinaPoly2.a).toBeCloseTo(180, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(-182.43243, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(-8189.1891, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(180, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(-182.43243, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(-8189.1891, 3); 
     });
 
     it("6. Necentrické zatížení, 2 síly", () => {
@@ -1246,16 +1246,16 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         }];
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(540, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(-770.2702, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(-20243.243, 3); 
+        expect(rovinaPoly1.a_plane).toBeCloseTo(540, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(-770.2702, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(-20243.243, 3); 
 
-        expect(rovinaPoly2.a).toBeCloseTo(270, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(-385.1351, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(-10121.6215, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(270, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(-385.1351, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(-10121.6215, 3); 
     });
 });
 
@@ -1286,18 +1286,20 @@ describe("Výpočet napětí pro náhodný průřez s nahodným zatížením", (
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(5.53826, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(-2.83191, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(401.5882, 3); 
+        expect(rovinaPoly1.a_plane).toBeCloseTo(5.53826, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(-2.83191, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(401.5882, 3); 
 
-        expect(rovinaPoly2.a).toBeCloseTo(1.38456719, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(-0.707978, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(100.3970, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(1.38456719, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(-0.707978, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(100.3970, 3); 
     });
 });
+
+
 
 describe("Výpočet napětí pro demonstrativní průřez z bakalářky", () => {
     let spravce: SpravceTeles;
@@ -1327,21 +1329,71 @@ describe("Výpočet napětí pro demonstrativní průřez z bakalářky", () => 
 
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
-        const rovinaPoly1 = vysledky[0]!; 
-        const rovinaPoly2 = vysledky[1]!; 
-        const rovinaPoly3 = vysledky[2]!; 
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
+        const rovinaPoly3 = vysledky.rovnice[2]!; 
 
-        expect(rovinaPoly1.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly1.b).toBeCloseTo(17.5990, 0); 
-        expect(rovinaPoly1.c).toBeCloseTo(-2088.9271, 3); 
+        expect(rovinaPoly1.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(17.5990, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(-2088.9271, 3); 
 
-        expect(rovinaPoly2.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly2.b).toBeCloseTo(123.193136, 3); 
-        expect(rovinaPoly2.c).toBeCloseTo(-14622.48973, 3); 
+        expect(rovinaPoly2.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(123.193136, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(-14622.48973, 3); 
 
-        expect(rovinaPoly3.a).toBeCloseTo(0, 4);
-        expect(rovinaPoly3.b).toBeCloseTo(4.6930718, 3); 
-        expect(rovinaPoly3.c).toBeCloseTo(-557.04722, 3); 
+        expect(rovinaPoly3.a_plane).toBeCloseTo(0, 4);
+        expect(rovinaPoly3.b_plane).toBeCloseTo(4.6930718, 3); 
+        expect(rovinaPoly3.c_plane).toBeCloseTo(-557.04722, 3); 
     });
 });
+
+//------------------------------------------------- SMĚRNICE PŘÍMEK NAPĚTÍ ---------------------------------------------------
+
+describe("Výpočet napětí a směrnice nulových přímek napětí pro náhodný průřez s nahodným zatížením", () => {
+    let spravce: SpravceTeles;
+
+    beforeEach(() => {
+        spravce = new SpravceTeles();
+    });
+        it("Obecný průřez", () => {
+
+        spravce.zpracujNovyTvar([-100, 180, 60, -200], [120, 230, 380, 300], 180, 7850, true);
+        spravce.zpracujNovyTvar([250, 300, 40], [80, -60, 35], 45, 7850, true);
+        
+        spravce.zvolene_E_ref = 180;
+
+        const zatizeni: ZadaniZatizeni[] = [{
+            hodnota: -25,
+            x_val: [-100],
+            y_val: [250]
+        }, {
+            hodnota: 8.06226,
+            x_val: [140],
+            y_val: [35]
+        }];
+        
+        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+
+        const rovinaPoly1 = vysledky.rovnice[0]!; 
+        const rovinaPoly2 = vysledky.rovnice[1]!; 
+
+        expect(rovinaPoly1.a_plane).toBeCloseTo(5.53826, 4);
+        expect(rovinaPoly1.b_plane).toBeCloseTo(-2.83191, 0); 
+        expect(rovinaPoly1.c_plane).toBeCloseTo(401.5882, 3); 
+        expect(rovinaPoly1.pruseciky_x).toHaveLength(2);
+        expect(rovinaPoly1.pruseciky_x![0]).toBeCloseTo(11.1835, 1);
+        expect(rovinaPoly1.pruseciky_x![1]).toBeCloseTo(97.6997, 1);
+
+        expect(rovinaPoly2.a_plane).toBeCloseTo(1.38456719, 4);
+        expect(rovinaPoly2.b_plane).toBeCloseTo(-0.707978, 3); 
+        expect(rovinaPoly2.c_plane).toBeCloseTo(100.3970, 3); 
+        expect(rovinaPoly2.pruseciky_x).toBeUndefined();
+
+        expect(vysledky.a_null_line).toBeCloseTo(1.95566, 3);
+        expect(vysledky.b_null_line).toBeCloseTo(141.80801, 3);  
+        expect(vysledky.x_null_line).toBeUndefined();
+    });
+});
+
+
 

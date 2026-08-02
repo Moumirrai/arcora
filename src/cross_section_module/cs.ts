@@ -127,12 +127,22 @@ export interface ZadaniZatizeni {
     y_val: number[]; // Souřadnice Y pro zadání
 }
 
+// --- NOVÉ OBECNÉ ROZHRANÍ PRO VÝSLEDEK ---
+export interface SouhrnRovnicNapeti {
+    rovnice: RovniceNapeti[];
+    a_null_line?: number;
+    b_null_line?: number;
+    x_null_line?: number;
+}
+
+// --- UPRAVENÉ ROZHRANÍ PRO KONKRÉTNÍ POLYGON ---
 export interface RovniceNapeti {
     polygon_id: string | number;
-    a: number;
-    b: number;
-    c: number;
+    a_plane: number;
+    b_plane: number;
+    c_plane: number;
     rovnice_text: string;
+    pruseciky_x?: number[]; // Ponecháme pouze průsečíky
 }
 
 export class Vrchol {
@@ -815,7 +825,7 @@ export class SpravceTeles {
     }
 
     // --- HLAVNÍ METODA PRO VÝPOČET ROVNICE ROVINY NAPĚTÍ ---
-    spocitejRovniceNapeti(zatizeni: ZadaniZatizeni[]): RovniceNapeti[] {
+    spocitejRovniceNapeti(zatizeni: ZadaniZatizeni[]): SouhrnRovnicNapeti {
         const sily = this.prevodZatizeniNaSily(zatizeni);
         const celk = this.spocitejCelkove();
 
@@ -831,65 +841,152 @@ export class SpravceTeles {
         const My_t = sily.My - N * xt_m;
         const jmenovatel = (Ix_m4 * Iy_m4) - (Dxy_m4 * Dxy_m4);
 
-        // Kontrola platnosti geometrie
         if (Math.abs(jmenovatel) < 1e-40) {
             throw new Error("Geometrie má nulovou nebo neplatnou tuhost.");
         }
 
         const E_ref = this.zvolene_E_ref ?? Math.max(...this.polygony.map(p => p.E));
 
-        // Plnohodnotné koeficienty Navierova vzorce pre ohyb 
         const a_ref = (My_t * Ix_m4 - Mx_t * Dxy_m4) / jmenovatel; 
         const b_ref = (Mx_t * Iy_m4 - My_t * Dxy_m4) / jmenovatel; 
 
-        return this.polygony.map(poly => {
-            // 1. Získání prvích 3 bodů pro sestavení soustavy (v metrech)
+        // GLOBÁLNÍ PROMĚNNÉ PRO NEUTRÁLNÍ OSU
+        let global_smernice_np: Smernice | undefined = undefined;
+        let global_a_null: number | undefined = undefined;
+        let global_b_null: number | undefined = undefined;
+        let global_x_null: number | undefined = undefined;
+
+        const rovnice = this.polygony.map((poly, index) => {
             const body = poly.x_val.slice(0, 3).map((x, i) => ({ 
                 x: x / 1000, 
                 y: poly.y_val[i]! / 1000 
             }));
             
-            // 2. Výpočet přesného napětí v těchto 3 bodích pomocí správného Navierova vzorce
             const sigma = body.map(b => {
                 const n = poly.E / E_ref;
                 const sigma_ref = (N / A_m2) + a_ref * (b.x - xt_m) + b_ref * (b.y - yt_m);
                 return sigma_ref * n;
             });
 
-            // 3. Řešení soustavy 3 rovnic o 3 neznámych (ax + by + c = sigma) pomocí symetrického Cramerovho pravidla
             const det = body[0]!.x * (body[1]!.y - body[2]!.y) +
                         body[1]!.x * (body[2]!.y - body[0]!.y) +
                         body[2]!.x * (body[0]!.y - body[1]!.y);
 
             const detA = sigma[0]! * (body[1]!.y - body[2]!.y) +
-                        sigma[1]! * (body[2]!.y - body[0]!.y) +
-                        sigma[2]! * (body[0]!.y - body[1]!.y);
+                         sigma[1]! * (body[2]!.y - body[0]!.y) +
+                         sigma[2]! * (body[0]!.y - body[1]!.y);
 
             const detB = body[0]!.x * (sigma[1]! - sigma[2]!) +
-                        body[1]!.x * (sigma[2]! - sigma[0]!) +
-                        body[2]!.x * (sigma[0]! - sigma[1]!);
+                         body[1]!.x * (sigma[2]! - sigma[0]!) +
+                         body[2]!.x * (sigma[0]! - sigma[1]!);
 
             const detC = body[0]!.x * (body[1]!.y * sigma[2]! - body[2]!.y * sigma[1]!) +
-                        body[1]!.x * (body[2]!.y * sigma[0]! - body[0]!.y * sigma[2]!) +
-                        body[2]!.x * (body[0]!.y * sigma[1]! - body[1]!.y * sigma[0]!);
+                         body[1]!.x * (body[2]!.y * sigma[0]! - body[0]!.y * sigma[2]!) +
+                         body[2]!.x * (body[0]!.y * sigma[1]! - body[1]!.y * sigma[0]!);
 
             const a = detA / det;
             const b = detB / det;
             const c = detC / det;
 
-            // 4. Prepočet na mm (koeficienty a, b vydelíme 1000, c zústává v Pa)
-            const a_mm = a / 1000;
-            const b_mm = b / 1000;
+            const a_plane_mm = a / 1000;
+            const b_plane_mm = b / 1000;
+            const c_plane = c;
 
+            // --- VÝPOČET NEUTRÁLNÍ OSY POUZE Z PRVNÍHO POLYGONU ---
+            if (index === 0) {
+                if (Math.abs(a_plane_mm) > 1e-9 || Math.abs(b_plane_mm) > 1e-9) {
+                    let x1, y1, x2, y2;
+                    
+                    if (Math.abs(a_plane_mm) > 1e-9) {
+                        y1 = 0;
+                        x1 = -(b_plane_mm * y1 + c_plane) / a_plane_mm;
+                        y2 = 100;
+                        x2 = -(b_plane_mm * y2 + c_plane) / a_plane_mm;
+                    } else {
+                        x1 = 0;
+                        y1 = -(a_plane_mm * x1 + c_plane) / b_plane_mm;
+                        x2 = 100;
+                        y2 = -(a_plane_mm * x2 + c_plane) / b_plane_mm;
+                    }
+
+                    if (Math.abs(x1 - x2) < 1e-9) {
+                        global_smernice_np = { typ: "svisla", x: x1 };
+                        global_x_null = x1;
+                    } else {
+                        const line_a = (y1 - y2) / (x1 - x2);
+                        const line_b = y1 - line_a * x1;
+                        global_smernice_np = { typ: "klasicka", a: line_a, b: line_b };
+                        global_a_null = line_a;
+                        global_b_null = line_b;
+                    }
+                }
+            }
+
+            // --- VÝPOČET PRŮSEČÍKŮ S HRANAMI POLYGONU ---
+            const pruseciky_x_arr: number[] = [];
+            
+            // Průsečíky počítáme jen pokud neutrální přímka existuje
+            if (global_smernice_np && poly.vysledky) {
+                const eps = 1e-7;
+                const smernice_hran = poly.vysledky.smernice;
+                
+                for (let i = 0; i < smernice_hran.length; i++) {
+                    const s_hrana = smernice_hran[i]!;
+                    const vx1 = poly.x_val[i]!;
+                    const vy1 = poly.y_val[i]!;
+                    const vx2 = poly.x_val[i + 1]!;
+                    const vy2 = poly.y_val[i + 1]!;
+
+                    let px: number | null = null;
+                    let py: number | null = null;
+
+                    if (global_smernice_np.typ === "svisla" && s_hrana.typ === "svisla") {
+                        continue; 
+                    } else if (global_smernice_np.typ === "svisla" && s_hrana.typ === "klasicka") {
+                        px = global_smernice_np.x;
+                        py = s_hrana.a * px + s_hrana.b;
+                    } else if (global_smernice_np.typ === "klasicka" && s_hrana.typ === "svisla") {
+                        px = s_hrana.x;
+                        py = global_smernice_np.a * px + global_smernice_np.b;
+                    } else if (global_smernice_np.typ === "klasicka" && s_hrana.typ === "klasicka") {
+                        if (Math.abs(global_smernice_np.a - s_hrana.a) < eps) continue; 
+                        px = (s_hrana.b - global_smernice_np.b) / (global_smernice_np.a - s_hrana.a);
+                        py = global_smernice_np.a * px + global_smernice_np.b;
+                    }
+
+                    if (px !== null && py !== null) {
+                        const minX = Math.min(vx1, vx2) - eps;
+                        const maxX = Math.max(vx1, vx2) + eps;
+                        const minY = Math.min(vy1, vy2) - eps;
+                        const maxY = Math.max(vy1, vy2) + eps;
+
+                        if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+                            if (!pruseciky_x_arr.some(existX => Math.abs(existX - px!) < eps)) {
+                                pruseciky_x_arr.push(px);
+                            }
+                        }
+                    }
+                }
+                pruseciky_x_arr.sort((val1, val2) => val1 - val2);
+            }
 
             return {
                 polygon_id: poly.id,
-                a: a_mm,
-                b: b_mm,
-                c: c,
-                rovnice_text: `z = ${a_mm.toExponential(4)}*x_mm + ${b_mm.toExponential(4)}*y_mm + ${c.toExponential(4)}`
+                a_plane: a_plane_mm,
+                b_plane: b_plane_mm,
+                c_plane: c_plane,
+                rovnice_text: `z = ${a_plane_mm.toExponential(4)}*x_mm + ${b_plane_mm.toExponential(4)}*y_mm + ${c_plane.toExponential(4)}`,
+                ...(pruseciky_x_arr.length > 0 ? { pruseciky_x: pruseciky_x_arr } : {})
             };
         });
+
+        // Návrat celého objektu (rovnice + globální parametry)
+        return {
+            rovnice,
+            ...(global_a_null !== undefined ? { a_null_line: global_a_null } : {}),
+            ...(global_b_null !== undefined ? { b_null_line: global_b_null } : {}),
+            ...(global_x_null !== undefined ? { x_null_line: global_x_null } : {})
+        };
     }
 }
 
