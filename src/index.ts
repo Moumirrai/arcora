@@ -15,5 +15,5 @@ export { AddElementOperation } from "@arcora/repository/operations/elementCreate
 export { RemoveNodeOperation } from "@arcora/repository/operations/nodeDelete";
 export { RemoveElementOperation } from "@arcora/repository/operations/elementDelete";
 export { UpdateNodeOperation } from "@arcora/repository/operations/nodeUpdate";
+export { SparseSolver } from "@arcora/core/solver/SparseSolver";
 export type * from "@arcora/core/types";
-export { add } from "@arcora/wasm/index";

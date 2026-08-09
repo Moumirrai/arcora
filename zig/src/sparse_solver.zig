@@ -67,10 +67,10 @@ export fn system_resize(handle: i32, new_n: u32, new_capacity: u32) bool {
     return true;
 }
 
-export fn system_solve(handle: i32, k_dirty: bool, f_dirty: bool) bool {
+export fn system_solve(handle: i32, shape_dirty: bool, k_dirty: bool, f_dirty: bool) bool {
     const sys = getSystem(handle) orelse return false;
 
-    const _shape_dirty = sys.shape_dirty;
+    const _shape_dirty = sys.shape_dirty or shape_dirty;
     const _k_dirty = _shape_dirty or k_dirty;
     const _f_dirty = _k_dirty or f_dirty;
 
@@ -99,6 +99,7 @@ export fn system_set_nnz(handle: i32, nnz: u32) bool {
     if (nnz != sys.nnz) {
         sys.nnz = nnz;
         sys.shape_dirty = true;
+        freeCSparseData(sys);
     }
 
     return true;

@@ -10,7 +10,12 @@ const exports = wasm.instance.exports as {
     new_n: number,
     new_capacity: number
   ) => boolean;
-  system_solve: (handle: number, k_dirty: boolean, f_dirty: boolean) => boolean;
+  system_solve: (
+    handle: number,
+    shape_dirty: boolean,
+    k_dirty: boolean,
+    f_dirty: boolean
+  ) => boolean;
   system_set_nnz: (handle: number, nnz: number) => boolean;
   system_destroy: (handle: number) => boolean;
   system_rows_ptr: (handle: number) => number;
