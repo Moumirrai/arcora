@@ -6,12 +6,11 @@ export type DisplacementMutable = { u?: number; v?: number; w?: number };
 
 export type Displacement = Readonly<DisplacementMutable>;
 
-export type NodalLoadMutable = { u?: number; v?: number; w?: number };
-
-export type NodalLoad = Readonly<NodalLoadMutable>;
-
 export enum Dof {
   Ux = 0,
   Uy = 1,
   Rz = 2,
 }
+
+export type WithOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>;

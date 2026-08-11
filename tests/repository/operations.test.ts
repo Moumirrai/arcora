@@ -8,6 +8,28 @@ import { AddElementOperation } from "@arcora/repository/operations/elementCreate
 import { RemoveElementOperation } from "@arcora/repository/operations/elementDelete";
 import { UpdateNodeOperation } from "@arcora/repository/operations/nodeUpdate";
 import type { NodeData } from "@arcora/core/entities/node";
+import { Material } from "@arcora/core/entities/material";
+import { Crossection } from "@arcora/core/entities/crossection";
+
+function addMaterialAndCrossection(model: Model): {
+  materialID: string;
+  crossectionID: string;
+} {
+  const material = new Material(model, {
+    E: 210e9,
+    G: 80e9,
+    alpha: 1.2e-5,
+    density: 7850,
+  });
+  const crossection = new Crossection(model, {
+    area: 0.01,
+    Iy: 8.333e-6,
+    Iz: 8.333e-6,
+  });
+  model.materials.set(material.id, material);
+  model.crossections.set(crossection.id, crossection);
+  return { materialID: material.id, crossectionID: crossection.id };
+}
 
 function makeTwoNodes(
   repo: ModelRepository
@@ -83,7 +105,12 @@ describe("RemoveNodeOperation", () => {
 
     const [nodeA, nodeB] = makeTwoNodes(repo);
 
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const elTxn = new Transaction("Add element");
     elTxn.addCommand(elOp);
     repo.commit(elTxn);
@@ -123,7 +150,12 @@ describe("RemoveNodeOperation", () => {
     const repo = new ModelRepository(model);
 
     const [nodeA, nodeB] = makeTwoNodes(repo);
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const elTxn = new Transaction("Add element");
     elTxn.addCommand(elOp);
     repo.commit(elTxn);
@@ -156,7 +188,12 @@ describe("AddElementOperation", () => {
 
     const [nodeA, nodeB] = makeTwoNodes(repo);
 
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const txn = new Transaction("Add element");
     txn.addCommand(elOp);
     repo.commit(txn);
@@ -175,9 +212,14 @@ describe("AddElementOperation", () => {
     let emitted = false;
     repo.onChange(() => (emitted = true));
 
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
     const txn = new Transaction("Add bad element");
     txn.addCommand(
-      new AddElementOperation({ nodeIDs: ["missing", "also-missing"] })
+      new AddElementOperation({
+        nodeIDs: ["missing", "also-missing"],
+        materialID,
+        crossectionID,
+      })
     );
     repo.commit(txn);
 
@@ -192,7 +234,12 @@ describe("RemoveElementOperation", () => {
     const repo = new ModelRepository(model);
 
     const [nodeA, nodeB] = makeTwoNodes(repo);
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const addTxn = new Transaction("Add element");
     addTxn.addCommand(elOp);
     repo.commit(addTxn);
@@ -269,7 +316,12 @@ describe("Change tracking", () => {
     const repo = new ModelRepository(model);
     const [nodeA, nodeB] = makeTwoNodes(repo);
 
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const elTxn = new Transaction("Add element");
     elTxn.addCommand(elOp);
     repo.commit(elTxn);
@@ -326,7 +378,12 @@ describe("UpdateNodeOperation", () => {
     const repo = new ModelRepository(model);
 
     const [nodeA, nodeB] = makeTwoNodes(repo);
-    const elOp = new AddElementOperation({ nodeIDs: [nodeA.id, nodeB.id] });
+    const { materialID, crossectionID } = addMaterialAndCrossection(model);
+    const elOp = new AddElementOperation({
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
     const elTxn = new Transaction("Add element");
     elTxn.addCommand(elOp);
     repo.commit(elTxn);

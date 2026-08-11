@@ -79,7 +79,6 @@ solver.setTriplets(rows, cols, vals);
 solver.setB(rhsVectors[0]!);
 solver.solve();
 
-
 // ── Benchmarks ─────────────────────────────────────────────────────────────
 
 let idx = 0;

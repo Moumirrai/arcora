@@ -1,4 +1,5 @@
 import type { Model } from "../model";
+import type { WithOptional } from "../types";
 
 export interface MaterialData {
   id: string;
@@ -7,6 +8,8 @@ export interface MaterialData {
   alpha: number; //Coefficient of thermal expansion
   density: number; //Density
 }
+
+export type MaterialDataPartial = WithOptional<MaterialData, "id">;
 
 export class Material {
   public readonly id: string;
@@ -17,10 +20,11 @@ export class Material {
   #density: number;
 
   #model: Model;
+  #dirty = false;
 
-  constructor(model: Model, data: MaterialData) {
+  constructor(model: Model, data: MaterialDataPartial) {
     this.#model = model;
-    this.id = data.id;
+    this.id = data.id ?? crypto.randomUUID();
     this.#E = data.E;
     this.#G = data.G;
     this.#alpha = data.alpha;
@@ -33,6 +37,7 @@ export class Material {
 
   set E(value: number) {
     this.#E = value;
+    this.#dirty = true;
     this.#model.dirty = true;
   }
 
@@ -42,6 +47,7 @@ export class Material {
 
   set G(value: number) {
     this.#G = value;
+    this.#dirty = true;
     this.#model.dirty = true;
   }
 
@@ -51,6 +57,7 @@ export class Material {
 
   set alpha(value: number) {
     this.#alpha = value;
+    this.#dirty = true;
     this.#model.dirty = true;
   }
 
@@ -60,7 +67,16 @@ export class Material {
 
   set density(value: number) {
     this.#density = value;
+    this.#dirty = true;
     this.#model.dirty = true;
+  }
+
+  get dirty(): boolean {
+    return this.#dirty;
+  }
+
+  cleanDirty(): void {
+    this.#dirty = false;
   }
 
   toData(): MaterialData {

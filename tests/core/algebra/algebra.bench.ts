@@ -25,7 +25,7 @@ describe("Matrix class", () => {
   bench("custom algebra", () => {
     const mappingMatrix = ln.Matrix.identity(6).setAt(3, 2, 2);
     const mat = mappingMatrix.transpose().multiply(matrixAln);
-    const result = mat.vecMult(vectorAln);
+    mat.vecMult(vectorAln);
   });
 
   bench("mathjs", () => {
@@ -33,6 +33,6 @@ describe("Matrix class", () => {
     mappingMatrix.set([3, 2], 2);
 
     const mat = mathjs.multiply(mathjs.transpose(mappingMatrix), matrixMathjs);
-    const result = mathjs.multiply(mat, vectorMathjs);
+    mathjs.multiply(mat, vectorMathjs);
   });
 });

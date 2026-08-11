@@ -1,6 +1,6 @@
 import { Matrix } from "@algebra";
 import type { Model } from "../model";
-import type { Node } from "./node";
+import type { WithOptional } from "../types";
 
 export class ElementsMap extends Map<string, Element> {
   constructor(private model: Model) {
@@ -47,16 +47,19 @@ export class ElementsMap extends Map<string, Element> {
 
 export interface ElementData {
   nodeIDs: readonly [string, string];
+  materialID: string;
+  crossectionID: string;
   id: string;
 }
 
-export type ElementDataPartial = Partial<ElementData> & {
-  nodeIDs: readonly [string, string];
-}; //all optional except nodeIDs
+export type ElementDataPartial = WithOptional<ElementData, "id">;
 
 export class Element {
   public readonly id: string;
   public readonly nodeIDs: readonly [string, string];
+
+  #materialID: string;
+  #crossectionID: string;
 
   #model: Model;
 
@@ -68,35 +71,47 @@ export class Element {
   #globalStiffnessMatrix: Matrix | undefined;
   #dirty = false;
 
-  #nodeA: Node | undefined;
-  #nodeB: Node | undefined;
-
   constructor(model: Model, data: ElementDataPartial) {
     this.#model = model;
     this.id = data.id ?? crypto.randomUUID();
     this.nodeIDs = data.nodeIDs;
+    this.#materialID = data.materialID;
+    this.#crossectionID = data.crossectionID;
     this.updateCache();
   }
 
   toData(): ElementData {
-    return { id: this.id, nodeIDs: this.nodeIDs };
+    return {
+      id: this.id,
+      nodeIDs: this.nodeIDs,
+      materialID: this.#materialID,
+      crossectionID: this.#crossectionID,
+    };
   }
 
   updateCache(): void {
-    this.#nodeA = this.#model.nodes.get(this.nodeIDs[0]);
-    this.#nodeB = this.#model.nodes.get(this.nodeIDs[1]);
-    if (!this.#nodeA || !this.#nodeB) {
+    const nodeA = this.#model.nodes.get(this.nodeIDs[0]);
+    const nodeB = this.#model.nodes.get(this.nodeIDs[1]);
+    if (!nodeA || !nodeB) {
       throw new Error(
         `Node ${this.nodeIDs[0]} or ${this.nodeIDs[1]} does not exist`
       );
     }
 
+    const material = this.#model.materials.get(this.#materialID);
+    const crossection = this.#model.crossections.get(this.#crossectionID);
+    if (!material || !crossection) {
+      throw new Error(
+        `Material ${this.#materialID} or crossection ${this.#crossectionID} does not exist`
+      );
+    }
+
     this.#len = Math.hypot(
-      this.#nodeB.pos.x - this.#nodeA.pos.x,
-      this.#nodeB.pos.z - this.#nodeA.pos.z
+      nodeB.pos.x - nodeA.pos.x,
+      nodeB.pos.z - nodeA.pos.z
     );
-    this.#cosine = (this.#nodeB.pos.x - this.#nodeA.pos.x) / this.#len;
-    this.#sine = (this.#nodeB.pos.z - this.#nodeA.pos.z) / this.#len;
+    this.#cosine = (nodeB.pos.x - nodeA.pos.x) / this.#len;
+    this.#sine = (nodeB.pos.z - nodeA.pos.z) / this.#len;
 
     const c = this.#cosine;
     const s = this.#sine;
@@ -111,10 +126,10 @@ export class Element {
     ]);
 
     this.#stiffnessMatrix = this.computeLocalStiffnessMatrix(
-      210e9,
-      0.01,
-      8.333e-6
-    ); //example values
+      material.E,
+      crossection.area,
+      crossection.Iy
+    );
 
     this.#globalStiffnessMatrix = this.#transformMatrix
       .transpose()
@@ -166,11 +181,16 @@ export class Element {
   }
 
   get dirty(): boolean {
-    // If element is dirty or any of the child nodes are dirty return true
+    const nodeA = this.#model.nodes.get(this.nodeIDs[0]);
+    const nodeB = this.#model.nodes.get(this.nodeIDs[1]);
+    const material = this.#model.materials.get(this.#materialID);
+    const crossection = this.#model.crossections.get(this.#crossectionID);
     return (
       this.#dirty ||
-      (this.#nodeA?.dirty ?? true) ||
-      (this.#nodeB?.dirty ?? true)
+      (nodeA?.dirty ?? true) ||
+      (nodeB?.dirty ?? true) ||
+      (material?.dirty ?? true) ||
+      (crossection?.dirty ?? true)
     );
   }
 
@@ -196,5 +216,25 @@ export class Element {
 
   get globalStiffnessMatrix(): Matrix | undefined {
     return this.#globalStiffnessMatrix;
+  }
+
+  get materialID(): string {
+    return this.#materialID;
+  }
+
+  get crossectionID(): string {
+    return this.#crossectionID;
+  }
+
+  set materialID(value: string) {
+    this.#materialID = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
+  }
+
+  set crossectionID(value: string) {
+    this.#crossectionID = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
   }
 }

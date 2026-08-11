@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { Element } from "../../../src/core/entities/element";
 import { Node } from "../../../src/core/entities/node";
+import { Material } from "../../../src/core/entities/material";
+import { Crossection } from "../../../src/core/entities/crossection";
 import { Model } from "../../../src/core/model";
 
 describe("Element class", () => {
@@ -18,10 +20,29 @@ describe("Element class", () => {
 
   model.setNodes(nodesMap);
 
+  const material = new Material(model, {
+    E: 210e9,
+    G: 80e9,
+    alpha: 1.2e-5,
+    density: 7850,
+  });
+  const crossection = new Crossection(model, {
+    area: 0.01,
+    Iy: 8.333e-6,
+    Iz: 8.333e-6,
+  });
+  model.materials.set(material.id, material);
+  model.crossections.set(crossection.id, crossection);
+
+  const materialID = material.id;
+  const crossectionID = crossection.id;
+
   it("returns correct length", () => {
     const element = new Element(model, {
       id: "element-1",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     expect(element.length).toBe(5); // 3-4-5 triangle
   });
@@ -31,6 +52,8 @@ describe("Element class", () => {
       new Element(model, {
         id: "element-2",
         nodeIDs: ["nonexistent-node-1", "nonexistent-node-2"],
+        materialID,
+        crossectionID,
       });
     }).toThrowError(
       `Node nonexistent-node-1 or nonexistent-node-2 does not exist`
@@ -41,6 +64,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-3",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     expect(element.cosine).toBeCloseTo(0.6); // 3/5
     expect(element.sine).toBeCloseTo(0.8); // 4/5
@@ -50,6 +75,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-4",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
 
     const k = element.stiffnessMatrix;
@@ -60,6 +87,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-10",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
 
     const k = element.stiffnessMatrix!;
@@ -79,6 +108,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-11",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     expect(element.length).toBe(5);
     expect(element.cosine).toBeCloseTo(0.6);
@@ -104,6 +135,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-5",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     expect(element.dirty).toBe(false);
   });
@@ -114,6 +147,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-6",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     expect(element.dirty).toBe(false);
     nodeA.pos = { x: 1, z: 0 };
@@ -124,6 +159,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-7",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     nodeB.pos = { x: 4, z: 4 };
     expect(element.dirty).toBe(true);
@@ -135,6 +172,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-8",
       nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
     });
     nodeA.cleanDirty();
     nodeB.cleanDirty();
@@ -153,6 +192,8 @@ describe("Element class", () => {
     const element = new Element(model, {
       id: "element-9",
       nodeIDs: [nodeD.id, nodeE.id],
+      materialID,
+      crossectionID,
     });
     expect(element.length).toBe(0);
     expect(isNaN(element.sine)).toBe(true);

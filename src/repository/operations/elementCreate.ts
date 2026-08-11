@@ -5,6 +5,8 @@ import type { TransactionChanges } from "../changes";
 
 type AddElementOptions = {
   nodeIDs: readonly [string, string];
+  materialID: string;
+  crossectionID: string;
   id?: string;
 };
 
@@ -33,10 +35,22 @@ export class AddElementOperation implements IOperation {
         `AddElementOperation: Node "${this.opts.nodeIDs[1]}" does not exist`
       );
     }
+    if (!model.materials.has(this.opts.materialID)) {
+      return new Error(
+        `AddElementOperation: Material "${this.opts.materialID}" does not exist`
+      );
+    }
+    if (!model.crossections.has(this.opts.crossectionID)) {
+      return new Error(
+        `AddElementOperation: Crossection "${this.opts.crossectionID}" does not exist`
+      );
+    }
 
     const newElement = new Element(model, {
       id: this.id,
       nodeIDs: this.opts.nodeIDs,
+      materialID: this.opts.materialID,
+      crossectionID: this.opts.crossectionID,
     });
     model.elements.set(this.id, newElement);
     this.createdElement = newElement;

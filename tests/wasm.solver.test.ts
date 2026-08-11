@@ -130,7 +130,7 @@ describe("WASM sparse solver correctness", () => {
         const b = new Float64Array(memory.buffer, systemBPtr(handle), N);
         b.set(rhs);
 
-        const success = systemSolve(handle, i === 0, true);
+        const success = systemSolve(handle, i === 0, true, true);
         expect(success).toBeTruthy();
 
         const x = new Float64Array(memory.buffer, systemXPtr(handle), N);
