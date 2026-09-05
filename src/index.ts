@@ -17,3 +17,4 @@ export { RemoveElementOperation } from "@arcora/repository/operations/elementDel
 export { UpdateNodeOperation } from "@arcora/repository/operations/nodeUpdate";
 export type * from "@arcora/core/types";
 export { add } from "@arcora/wasm/index";
+export * as cs from "@arcora/cross_section_module/cs";
