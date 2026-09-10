@@ -229,7 +229,7 @@ export class Polygon {
         this.vypocet();
     }
 
-    private vypocet(): void {
+    public vypocet(): void {
         // 4. ZMĚNA: Úprava validace a uzavření polygonu tak, aby pracovala s objekty Vrchol
         if (this.vrcholy.length < 3) {
             throw new Error("Pro výpočet zadejte alespoň 3 body");
@@ -725,6 +725,32 @@ export class SpravceTeles {
             i_max,
             i_min
         };
+    }
+
+    upravBod(idTvaru: string, idVrcholu: string, modelX: number, modelY: number): void {
+        // 1. Nalezení konkrétního polygonu podle ID
+        const polygon = this.polygony.find(p => p.id === idTvaru);
+        if (!polygon) {
+            console.warn(`Polygon s ID ${idTvaru} nebyl nalezen.`);
+            return;
+        }
+
+        // 2. Nalezení konkrétního vrcholu uvnitř polygonu
+        const vrchol = polygon.vrcholy.find(v => v.id === idVrcholu);
+        if (!vrchol) {
+            console.warn(`Vrchol s ID ${idVrcholu} nebyl nalezen.`);
+            return;
+        }
+
+        // 3. Úprava souřadnic
+        vrchol.x = modelX;
+        vrchol.y = modelY;
+
+        // 4. Přepočet lokálních charakteristik upraveného polygonu (plocha, těžiště, momenty...)
+        polygon.vypocet();
+
+        // 5. Aktualizace globálních průsečíků hran (pokud s nimi GUI v reálném čase pracuje)
+        this.aktualizujPruseciky();
     }
 
     // --- POMOCNÁ METODA PRO VÝPOČET NÁHRADNÍCH SIL ---

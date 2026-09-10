@@ -26,7 +26,8 @@
   },
   "exports": {
     "import": "./dist/index.mjs",
-    "types": "./dist/index.d.mts"
+    "types": "./dist/index.d.mts",
+    "default": "./src/index.ts"
   },
   "description": "Finite Element Method engine for structural analysis, written in TypeScript",
   "files": [
