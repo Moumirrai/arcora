@@ -617,6 +617,8 @@ describe("Testování průniků polygonů", () => {
         spravce.zvolene_E_ref = 1;
         const vysledky = spravce.spocitejCelkove();
 
+        expect(spravce.polygony.length).toBe(1);
+
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
         expect(vysledky.celkova_sirka_b).toBeCloseTo(150, 5);
         
@@ -661,6 +663,8 @@ describe("Testování průniků polygonů", () => {
 
         spravce.zvolene_E_ref = 1;
         const vysledky = spravce.spocitejCelkove();
+
+        expect(spravce.polygony.length).toBe(2);
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(750, 5);
         expect(vysledky.celkova_sirka_b).toBeCloseTo(500, 5);
