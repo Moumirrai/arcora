@@ -728,28 +728,107 @@ export class SpravceTeles {
     }
 
     upravBod(idTvaru: string, idVrcholu: string, modelX: number, modelY: number): void {
-        // 1. Nalezení konkrétního polygonu podle ID
-        const polygon = this.polygony.find(p => p.id === idTvaru);
-        if (!polygon) {
+        // 1. Nalezení polygonu a vrcholu
+        const indexTvaru = this.polygony.findIndex(p => p.id === idTvaru);
+        if (indexTvaru === -1) {
             console.warn(`Polygon s ID ${idTvaru} nebyl nalezen.`);
             return;
         }
 
-        // 2. Nalezení konkrétního vrcholu uvnitř polygonu
+        const polygon = this.polygony[indexTvaru]!;
         const vrchol = polygon.vrcholy.find(v => v.id === idVrcholu);
+        
         if (!vrchol) {
             console.warn(`Vrchol s ID ${idVrcholu} nebyl nalezen.`);
             return;
         }
 
-        // 3. Úprava souřadnic
+        // 2. Úprava souřadnic a lokální přepočet
         vrchol.x = modelX;
         vrchol.y = modelY;
-
-        // 4. Přepočet lokálních charakteristik upraveného polygonu (plocha, těžiště, momenty...)
         polygon.vypocet();
 
-        // 5. Aktualizace globálních průsečíků hran (pokud s nimi GUI v reálném čase pracuje)
+        // 3. CHYTRÁ KONTROLA PRO OTVORY (MÍNUSOVÉ POLYGONY)
+        if (!polygon.kladne) {
+            // Převedení aktuálního otvoru do formátu polygon-clipping
+            const minusKruh = polygon.x_val.map((x, i) => [x, polygon.y_val[i]!] as [number, number]);
+            const formatMinus = [minusKruh];
+
+            let jeZcelaUvnitr = false;
+            let protinajiciPlusPoly: Polygon | null = null;
+            let protinajiciFormatPlus: polygonClipping.Geom | null = null;
+
+            // Kontrola proti všem existujícím kladným tělesům
+            for (let i = 0; i < this.polygony.length; i++) {
+                const plusPoly = this.polygony[i]!;
+                if (!plusPoly.kladne) continue;
+
+                const plusKruh = plusPoly.x_val.map((x, j) => [x, plusPoly.y_val[j]!] as [number, number]);
+                const formatPlus = [plusKruh];
+
+                // a) Zjistíme, zda je náš upravovaný otvor STÁLE ZCELA UVNITŘ
+                const zbytekZMinus = polygonClipping.difference([formatMinus], [formatPlus]);
+                if (zbytekZMinus.length === 0) {
+                    jeZcelaUvnitr = true;
+                    break; // Našli jsme rodiče a jsme uvnitř, můžeme testování ukončit
+                }
+
+                // b) Zjistíme, jestli se s tělesem alespoň částečně protínáme (pro případný ořez)
+                if (!protinajiciPlusPoly) {
+                    const prunik = polygonClipping.intersection([formatMinus], [formatPlus]);
+                    if (prunik.length > 0) {
+                        protinajiciPlusPoly = plusPoly;
+                        protinajiciFormatPlus = [formatPlus];
+                    }
+                }
+            }
+
+            // 4. Pokud otvor porušil hranici (není už zcela uvnitř), provedeme trvalý ořez a otvor smažeme
+            if (!jeZcelaUvnitr) {
+                if (protinajiciPlusPoly && protinajiciFormatPlus) {
+                    // Fyzické odečtení hmoty na rozhraní
+                    const vysledekOrezu = polygonClipping.difference(protinajiciFormatPlus, [formatMinus]);
+
+                    if (vysledekOrezu.length === 0) {
+                        // Kdyby uživatel roztáhl mínus do takových rozměrů, že by spolkl celý kladný polygon
+                        const indexPlus = this.polygony.findIndex(p => p.id === protinajiciPlusPoly!.id);
+                        if (indexPlus !== -1) this.polygony.splice(indexPlus, 1);
+                    } else {
+                        // Aplikování vykousnutého tvaru zpět
+                        for (let k = 0; k < vysledekOrezu.length; k++) {
+                            const polygonZastupce = vysledekOrezu[k]!;
+                            const vnejsiHranice = polygonZastupce[0]!;
+                            
+                            const noveX = vnejsiHranice.map(p => p[0]);
+                            const noveY = vnejsiHranice.map(p => p[1]);
+
+                            if (k === 0) {
+                                protinajiciPlusPoly.update(noveX, noveY, true, protinajiciPlusPoly.ro, protinajiciPlusPoly.E);
+                            } else {
+                                this.polygony.push(new Polygon(noveX, noveY, true, protinajiciPlusPoly.ro, protinajiciPlusPoly.E));
+                            }
+
+                            // Zachování případných nových děr vzniklých složitým ořezem (třeba spojení U-profilu)
+                            for (let h = 1; h < polygonZastupce.length; h++) {
+                                const diraHranice = polygonZastupce[h]!;
+                                const diraX = diraHranice.map(p => p[0]);
+                                const diraY = diraHranice.map(p => p[1]);
+                                this.polygony.push(new Polygon(diraX, diraY, false, protinajiciPlusPoly.ro, protinajiciPlusPoly.E));
+                            }
+                        }
+                    }
+                }
+
+                // Jelikož otvor vykonal své dílo (vykousl okraj) nebo byl vytažen zcela do prázdna,
+                // jako samostatná entita zaniká.
+                const aktualniIndex = this.polygony.findIndex(p => p.id === polygon.id);
+                if (aktualniIndex !== -1) {
+                    this.polygony.splice(aktualniIndex, 1);
+                }
+            }
+        }
+
+        // 5. Následná aktualizace veškerých průsečíků a linek
         this.aktualizujPruseciky();
     }
 
