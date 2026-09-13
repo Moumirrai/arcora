@@ -914,7 +914,7 @@ describe("Testování průniků polygonů", () => {
         expect(vysledky.W_y_p).toBeCloseTo(1611111.11, 2);
         expect(vysledky.W_y_l).toBeCloseTo(1611111.11, 2);
 
-        expect(vysledky.alfa_deg).toBeCloseTo(90, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
 
         expect(vysledky.vysledny_moment_max).toBeCloseTo(241666666.67, 2); 
         expect(vysledky.vysledny_moment_min).toBeCloseTo(241666666.67, 2);
@@ -959,7 +959,7 @@ describe("Testování průniků polygonů", () => {
         expect(vysledky.W_y_p).toBeCloseTo(10000000, 2);
         expect(vysledky.W_y_l).toBeCloseTo(10000000, 2);
 
-        expect(vysledky.alfa_deg).toBeCloseTo(90, 2);
+        expect(vysledky.alfa_deg).toBeCloseTo(0, 2);
 
         expect(vysledky.vysledny_moment_max).toBeCloseTo(2000000000, 2); 
         expect(vysledky.vysledny_moment_min).toBeCloseTo(2000000000, 2);

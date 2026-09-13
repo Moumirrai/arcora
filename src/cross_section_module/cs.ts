@@ -622,18 +622,37 @@ export class SpravceTeles {
             vysledny_dev_moment += (D_xy + A * dy * dx) * pomerni_E;
         }
 
-        // --- 5. HLAVNÍ ÚHEL NATOČENÍ ---
-        const citatel_uhlu = 2 * vysledny_dev_moment;
-        const jmenovatel_uhlu = vysledny_moment_x - vysledny_moment_y;
-        const alfa_rad = 0.5 * Math.atan2(citatel_uhlu, jmenovatel_uhlu);
-        const alfa_deg = alfa_rad * (180 / Math.PI);
-
-        // --- 6. HLAVNÍ MOMENTY SETRVAČNOSTI ---
+        // --- 5. HLAVNÍ MOMENTY SETRVAČNOSTI ---
         const moment_prumer = 0.5 * (vysledny_moment_x + vysledny_moment_y);
         const moment_rozdil = 0.5 * Math.sqrt(Math.pow(vysledny_moment_x - vysledny_moment_y, 2) + 4 * Math.pow(vysledny_dev_moment, 2));
         
         const vysledny_moment_max = moment_prumer + moment_rozdil;
         const vysledny_moment_min = moment_prumer - moment_rozdil;
+
+        // --- 6. HLAVNÍ ÚHEL NATOČENÍ ---
+        const citatel_uhlu = 2 * vysledny_dev_moment;
+        const jmenovatel_uhlu = vysledny_moment_x - vysledny_moment_y;
+
+        // Numerická stabilita pro téměř symetrické průřezy:
+        // Pokud jsou OBA členy (2·Dxy i Ix − Iy) řádově zanedbatelné vzhledem k velikosti
+        // hlavních momentů, považujeme průřez za symetrický → α = 0.
+        // Bez tohoto ošetření by drobné zaokrouhlovací chyby (např. z ortho snapu, kde
+        // cos(90°) v JS není přesně 0 ale 6.12e-17) způsobily, že atan2(ε₁, ε₂) vrací
+        // naprosto náhodný úhel — proto se α u "stejných" čtverců lišilo pokaždé.
+        const scale_moment = Math.max(
+            Math.abs(vysledny_moment_x),
+            Math.abs(vysledny_moment_y),
+            Math.abs(vysledny_moment_max),
+            Math.abs(vysledny_moment_min)
+        ) || 1;
+        const eps_alpha = 1e-8 * scale_moment;
+
+        const jeSymetricky =
+            Math.abs(citatel_uhlu) < eps_alpha &&
+            Math.abs(jmenovatel_uhlu) < eps_alpha;
+
+        const alfa_rad = jeSymetricky ? 0 : 0.5 * Math.atan2(citatel_uhlu, jmenovatel_uhlu);
+        const alfa_deg = alfa_rad * (180 / Math.PI);
 
         // --- 7. EXTRÉMNÍ SOUŘADNICE KLADNÝCH POLYGONŮ ---
         // Vytáhneme pouze body z polygonů s kladným znaménkem (značí vnější hrany průřezu, bez děr)
