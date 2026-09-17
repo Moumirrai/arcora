@@ -1,5 +1,46 @@
 import polygonClipping from 'polygon-clipping';
 
+// ===== Pomocné funkce pro práci s polygon-clipping =====
+
+// Absolutní plocha ringu (vnějšího obrysu) pomocí shoelace formule.
+// Odolné i proti zacykleným ringům (poslední bod = první bod).
+function plochaRingu(ring: ReadonlyArray<readonly [number, number]>): number {
+    const n = ring.length;
+    if (n < 3) return 0;
+    let area = 0;
+    for (let i = 0; i < n; i++) {
+        const x1 = ring[i]![0]!;
+        const y1 = ring[i]![1]!;
+        const x2 = ring[(i + 1) % n]![0]!;
+        const y2 = ring[(i + 1) % n]![1]!;
+        area += (x1 * y2 - x2 * y1);
+    }
+    return Math.abs(area / 2);
+}
+
+// Vyčistí MultiPolygon od degenerovaných tvarů s plochou pod prahem.
+// Řeší "neviditelné slivery", které polygon-clipping občas vyprodukuje
+// při odečítání tvarů, jež se přesně dotýkají hranou.
+function vycistiMultiPolygon(
+    mp: polygonClipping.MultiPolygon,
+    prahPlochy = 1e-3
+): polygonClipping.MultiPolygon {
+    const vysledek: polygonClipping.MultiPolygon = [];
+    for (const poly of mp) {
+        const outer = poly[0]!;
+        if (plochaRingu(outer as any) < prahPlochy) continue;
+        const ocisteny: polygonClipping.MultiPolygon[number] = [outer];
+        for (let h = 1; h < poly.length; h++) {
+            const hRing = poly[h]!;
+            if (plochaRingu(hRing as any) >= prahPlochy) {
+                ocisteny.push(hRing);
+            }
+        }
+        vysledek.push(ocisteny);
+    }
+    return vysledek;
+}
+
 export function plochaPodVektorem(x1: number, x2: number, y1: number, y2: number): number {
     return ((Math.abs(x1 - x2) * Math.abs(y1 - y2)) / 2) + (Math.abs(x1 - x2) * Math.min(Math.abs(y1), Math.abs(y2)));
 }
@@ -366,113 +407,124 @@ export class SpravceTeles {
     pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
 
+        // Vrátí aktuální materiál (E, ro) jako MultiPolygon.
+    // Polygony se aplikují v pořadí, v jakém jsou v this.polygony:
+    //   kladný = union, záporný = difference.
+    // Toto pořadí odpovídá pořadí, v jakém je uživatel vytvářel, což dává
+    // správný výsledek (P1, díra H, ostrůvek N, mostek B, …).
+    public resolveMaterial(E: number, ro: number): polygonClipping.MultiPolygon {
+        let result: polygonClipping.MultiPolygon = [];
+        for (const poly of this.polygony) {
+            if (poly.E !== E || poly.ro !== ro) continue;
+            const ring = poly.x_val.map((x, i) => [x, poly.y_val[i]!] as [number, number]);
+            if (poly.kladne) {
+                result = polygonClipping.union(result, [ring]);
+            } else {
+                result = polygonClipping.difference(result, [ring]);
+            }
+        }
+        return result;
+    }
+
+    // Seřadí polygony podle hloubky vnoření (kolik jiných polygonů je obsahuje).
+    // Slouží k tomu, aby v this.polygony byly vždy „vnější" tvary dřív než jejich díry
+    // a ostrůvky uvnitř děr. Tím je zaručeno, že resolveMaterial v dalším kroku
+    // vyhodnotí vztahy správně.
+    private sortByDepth(polys: Polygon[]): Polygon[] {
+        if (polys.length <= 1) return polys;
+
+        const rings = polys.map(p =>
+            p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number])
+        );
+
+        const depths = polys.map((_, i) => {
+            let d = 0;
+            const ringI = rings[i]!;
+            for (let j = 0; j < polys.length; j++) {
+                if (i === j) continue;
+                const ringJ = rings[j]!;
+                // polys[i] je uvnitř polys[j], pokud všechny jeho vrcholy leží v j.
+                if (ringI.every(([x, y]) => this.pointInRing(x, y, ringJ))) d++;
+            }
+            return d;
+        });
+
+        const indices = polys.map((_, i) => i);
+        indices.sort((a, b) => {
+            if (depths[a] !== depths[b]) return depths[a]! - depths[b]!;
+            const absA = Math.abs(polys[a]!.vysledky?.plocha ?? 0);
+            const absB = Math.abs(polys[b]!.vysledky?.plocha ?? 0);
+            return absB - absA; // větší první (stabilnější pořadí)
+        });
+
+        return indices.map(i => polys[i]!);
+    }
+
+    // Test bodu uvnitř ringu (ray casting, funguje pro libovolný jednoduchý polygon).
+    private pointInRing(px: number, py: number, ring: [number, number][]): boolean {
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const [xi, yi] = ring[i]!;
+            const [xj, yj] = ring[j]!;
+            const intersect =
+                ((yi > py) !== (yj > py)) &&
+                (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
     // --- NOVÁ METODA PRO MODELOVÁNÍ TVARŮ (BOOLEAN OPERACE) ---
-    zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean): void {
-        // Knihovna polygon-clipping přijímá formát Polygon (Pole ringů, kde ring je pole bodů [x, y])
-        // První ring [0] je vždy vnější hranice.
+    public zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean): void {
         const novyKruh = x_coords.map((x, i) => [x, y_coords[i]!] as [number, number]);
-        const formatNoveno = [novyKruh]; 
 
-        for (let i = 0; i < this.polygony.length; i++) {
-            const staryPoly = this.polygony[i]!;
-            
-            // Boolean operace obrysů děláme jen pro hlavní (kladná) tělesa.
-            // Záporné polygony (otvory) ignorujeme, ty si žijí vlastním životem pro statiku.
-            if (!staryPoly.kladne) continue;
+        // Ochranná brzda: degenerovaný vstup
+        if (plochaRingu(novyKruh) < 1e-6) return;
 
-            const staryKruh = staryPoly.x_val.map((x, j) => [x, staryPoly.y_val[j]!] as [number, number]);
-            const formatStareho = [staryKruh];
+        // 1) Aktuální materiál (E, ro) jako MultiPolygon (v pořadí, v jakém byl
+        //    vytvářen – to je důležité pro správné vyhodnocení boolean operací).
+        const current = this.resolveMaterial(E, ro);
 
-            // 1. Zjistíme, zda existuje jakýkoliv průnik
-            const prunik = polygonClipping.intersection([formatNoveno], [formatStareho]);
-            
-            if (prunik.length > 0) {
-                // 1. Zjistíme, zda je nový tvar nakreslený ZCELA UVNITŘ
-                const zbytekZNoveno = polygonClipping.difference([formatNoveno], [formatStareho]);
-                const jeZcelaUvnitr = zbytekZNoveno.length === 0;
+        // 2) Aplikace nového tvaru: + = union, − = difference.
+        //    Tím se přirozeně vyřeší VŠECHNY případy: sloučení dvou kusů,
+        //    vyplnění části otvoru, odečtení přes ostrůvek, obkreslení atd.
+        let newMaterial: polygonClipping.MultiPolygon;
+        if (jeToPlus) {
+            newMaterial = polygonClipping.union(current, [novyKruh]);
+        } else {
+            newMaterial = polygonClipping.difference(current, [novyKruh]);
+        }
+        newMaterial = vycistiMultiPolygon(newMaterial);
 
-                // --- PŘIDÁNO: Zjistíme, zda minusový tvar ZCELA VYMAZAL starý tvar ---
-                const zbytekZeStareho = polygonClipping.difference([formatStareho], [formatNoveno]);
-                const smazanoCele = zbytekZeStareho.length === 0;
+        // 3) Polygony jiných materiálů necháváme beze změny.
+        const otherPolys = this.polygony.filter(p => p.E !== E || p.ro !== ro);
 
-                // A) ÚPLNÉ VYMAZÁNÍ (MÍNUS): Nový tvar smazal ten starý
-                if (smazanoCele && !jeToPlus) {
-                    // Polygon kompletně odstraníme z paměti (i jeho ID zmizí)
-                    this.polygony.splice(i, 1);
-                    return; // Operace dokončena
-                }
+        // 4) Re-dekompozice: každý „kus" MultiPolygonu → kladný Polygon s vnějším ringem
+        //    + záporné Polygony pro každou díru. Ostrůvky uvnitř děr vyjdou jako
+        //    samostatné kladné polygony (přesně jako když je uživatel nakreslí).
+        const newPolys: Polygon[] = [];
+        for (const part of newMaterial) {
+            const outer = part[0]!;
+            const outerX = outer.map(p => p[0]);
+            const outerY = outer.map(p => p[1]);
+            newPolys.push(new Polygon(outerX, outerY, true, ro, E));
 
-                // B) OTVOR (MÍNUS): Tvar je celý uvnitř, ale starý polygon stále existuje
-                if (jeZcelaUvnitr && !jeToPlus) {
-                    this.polygony.push(new Polygon(x_coords, y_coords, false, ro, E));
-                    return; 
-                }
-
-                // --- zbytek kódu pokračuje stejně (C - ČÁSTEČNÝ PRŮNIK atd.) ---
-                const stejnyMaterial = (staryPoly.E === E && staryPoly.ro === ro);
-
-                if (!stejnyMaterial) {
-                    throw new Error("Tvary s rozdílným materiálem se mohou překrývat pouze jako otvory (mínusem zcela uvnitř).");
-                }
-
-                let vysledekKnihovny: polygonClipping.MultiPolygon;
-
-                if (jeToPlus) {
-                    // SLOUČENÍ (+)
-                    vysledekKnihovny = polygonClipping.union([formatNoveno], [formatStareho]);
-                } else {
-                    // ODŘÍZNUTÍ (-)
-                    vysledekKnihovny = polygonClipping.difference([formatStareho], [formatNoveno]);
-                    
-                    if (vysledekKnihovny.length === 0) {
-                        // Tvar byl mínusem celý vymazán -> odstraníme ho z paměti
-                        this.polygony.splice(i, 1);
-                        return;
-                    }
-                }
-
-                // Aplikace výsledku zpět do objektů (ošetřuje i případ, kdy odřezání rozpůlí polygon na dva kusy)
-                for (let k = 0; k < vysledekKnihovny.length; k++) {
-                    const polygonZastupce = vysledekKnihovny[k]!;
-                    const vnejsiHranice = polygonZastupce[0]!; // Vnější ring
-                    
-                    const noveX = vnejsiHranice.map(p => p[0]);
-                    const noveY = vnejsiHranice.map(p => p[1]);
-
-                    if (k === 0) {
-                        // První tvar zaktualizuje náš existující polygon
-                        staryPoly.update(noveX, noveY, true, ro, E);
-                    } else {
-                        // Pokud vznikly další kusy (rozpůlení), přidáme je jako zcela nové polygony
-                        this.polygony.push(new Polygon(noveX, noveY, true, ro, E));
-                    }
-
-                    // --- NOVÁ ČÁST: DETEKCE A ULOŽENÍ OTVORŮ ---
-                    // Pokud uzavřením tvaru vznikla díra, knihovna ji vrátí na indexech 1 a výše
-                    for (let h = 1; h < polygonZastupce.length; h++) {
-                        const diraHranice = polygonZastupce[h]!;
-                        const diraX = diraHranice.map(p => p[0]);
-                        const diraY = diraHranice.map(p => p[1]);
-                        
-                        // Díru uložíme přímo jako záporný polygon!
-                        // Bude fungovat úplně stejně, jako kdyby ji uživatel nakreslil ručně s MÍNUSEM.
-                        this.polygony.push(new Polygon(diraX, diraY, false, ro, E));
-                    }
-                }
-                return; // Operace dokončena, našli jsme cíl
+            for (let h = 1; h < part.length; h++) {
+                const hole = part[h]!;
+                const holeX = hole.map(p => p[0]);
+                const holeY = hole.map(p => p[1]);
+                newPolys.push(new Polygon(holeX, holeY, false, ro, E));
             }
         }
 
-        // --- C) KRESLENÍ DO PRÁZDNA ---
-        // Pokud cyklus doběhl a nenašel se průnik se žádným tělesem, 
-        // znamená to, že uživatel kreslí úplně mimo existující polygony.
-        
-        if (jeToPlus) {
-            // když je polygon plus mimo všechny tak se přidá jakonový
-            this.polygony.push(new Polygon(x_coords, y_coords, true, ro, E));
-        } else {
-            // když je polygon mínus mimo všechny tak se (nikdy) nic nestane 
-        }
+        // 5) Seřadit podle hloubky vnoření, aby budoucí resolveMaterial()
+        //    vyhodnocoval v pořadí: vnější kladný → jeho díry → ostrůvky v dírách → …
+        //    (Bez tohoto by mohl polygon-clipping vrátit kusy v libovolném pořadí
+        //    a ostrůvek by se v dalším kroku mohl chovat jako by nebyl.)
+        const sortedNewPolys = this.sortByDepth(newPolys);
+
+        // 6) Nahradit polygony tohoto materiálu; ostatní materiály zachovat.
+        this.polygony = [...otherPolys, ...sortedNewPolys];
     }
 
     // Vypočet průsečíků všech přímek ze všech polygonů navzájem
