@@ -202,7 +202,7 @@ export class Vrchol {
         this.y = y;
     }
 
-    // Metoda pro export do čistého datového objektu (podobně jako má kolega toData())
+    // Metoda pro export do čistého datového objektu 
     toData() {
         return {
             id: this.id,
@@ -407,7 +407,7 @@ export class SpravceTeles {
     pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
 
-        // Vrátí aktuální materiál (E, ro) jako MultiPolygon.
+    // Vrátí aktuální materiál (E, ro) jako MultiPolygon.
     // Polygony se aplikují v pořadí, v jakém jsou v this.polygony:
     //   kladný = union, záporný = difference.
     // Toto pořadí odpovídá pořadí, v jakém je uživatel vytvářel, což dává
@@ -1170,3 +1170,31 @@ export class SpravceTeles {
 
 
 
+
+//----------------------------------------------------------------------------------------------------------------------------
+//                                      POSTUP TVOŘENÍ PRŮŘEZU Z POLYGONŮ:
+//----------------------------------------------------------------------------------------------------------------------------
+//
+// 1) zpracujNovyTvar(x, y, E, ro, jeToPlus)
+//    │
+//    ├── 2) current = resolveMaterial(E, ro)
+//    │      → přehraje všechny existující polygony tohoto materiálu
+//    │        přes union (kladné) a difference (záporné)
+//    │      → vrátí MultiPolygon = "jak materiál aktuálně vypadá"
+//    │
+//    ├── 3) newMaterial = union(current, N)  [pro +]
+//    │             nebo difference(current, N)  [pro −]
+//    │      → polygon-clipping zařídí geometrii, sám rozhodne,
+//    │        jestli vznikly nové kusy, díry, ostrůvky
+//    │
+//    ├── 4) vycistiMultiPolygon(newMaterial)
+//    │      → odstraní numerické slivery
+//    │
+//    ├── 5) Re-dekompozice: pro každý polygon v MultiPolygonu
+//    │      → outer ring = kladný Polygon
+//    │      → každý další ring (díra) = záporný Polygon
+//    │
+//    ├── 6) sortByDepth(newPolys)
+//    │      → seřadí tak, aby vnější tvary šly první
+//    │
+//    └── 7) this.polygony = [...ostatní materiály, ...seřazené nové]
