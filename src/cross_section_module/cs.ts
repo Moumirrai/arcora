@@ -41,6 +41,24 @@ function vycistiMultiPolygon(
     return vysledek;
 }
 
+// Sloučí vrcholy se stejnými souřadnicemi v rámci jednoho ringu.
+// Používá se po boolean operacích - polygon-clipping občas vrací ringy
+// s duplikovanými body (dva vrcholy na sobě). Tolerance je 1e-6 mm,
+// což je hluboko pod praktickou přesností, ale dost na numerický šum.
+function deduplikujVrcholy(x: number[], y: number[]): { x: number[]; y: number[] } {
+    const seen = new Set<string>();
+    const nx: number[] = [];
+    const ny: number[] = [];
+    for (let i = 0; i < x.length; i++) {
+        const key = `${Math.round(x[i]! * 1e6)},${Math.round(y[i]! * 1e6)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        nx.push(x[i]!);
+        ny.push(y[i]!);
+    }
+    return { x: nx, y: ny };
+}
+
 export function plochaPodVektorem(x1: number, x2: number, y1: number, y2: number): number {
     return ((Math.abs(x1 - x2) * Math.abs(y1 - y2)) / 2) + (Math.abs(x1 - x2) * Math.min(Math.abs(y1), Math.abs(y2)));
 }
@@ -247,10 +265,13 @@ export class Polygon {
         this.ro = ro;
         this.E = E;
         
-        // 3. ZMĚNA: Inicializace vrcholů do nového pole
+        // Deduplikace vrcholů (odstraní body na sobě, které mohou vzniknout
+        // po boolean operacích v polygon-clipping)
+        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
+
         this.vrcholy = [];
-        for (let i = 0; i < x_values.length; i++) {
-            this.vrcholy.push(new Vrchol(this.id, x_values[i]!, y_values[i]!));
+        for (let i = 0; i < xd.length; i++) {
+            this.vrcholy.push(new Vrchol(this.id, xd[i]!, yd[i]!));
         }
 
         this.vypocet();
@@ -261,10 +282,12 @@ export class Polygon {
         this.ro = ro;
         this.E = E;
         
-        // Přepsání vrcholů při aktualizaci
+        // Stejná deduplikace jako v konstruktoru
+        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
+
         this.vrcholy = [];
-        for (let i = 0; i < x_values.length; i++) {
-            this.vrcholy.push(new Vrchol(this.id, x_values[i]!, y_values[i]!));
+        for (let i = 0; i < xd.length; i++) {
+            this.vrcholy.push(new Vrchol(this.id, xd[i]!, yd[i]!));
         }
 
         this.vypocet();
@@ -406,6 +429,156 @@ export class SpravceTeles {
     plocha: number = 0;
     pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
+
+    // Detekuje geometrické kolize:
+    //   1) self-intersection u jakéhokoli polygonu (i záporného),
+    //   2) průsečíky hran mezi kladnými polygony (kříž, částečný překryv),
+    //   3) průsečíky hran kladný ↔ záporný (spike kladného do otvoru),
+    //   4) plné pohlcení: vnitřní polygon musí být CELÝ uvnitř některého
+    //      negativu, aby to byl legitimní ostrůvek. Jinak je to kolize.
+    public detekujKolize(): boolean {
+        // 1) Self-intersection u všech polygonů
+        for (const P of this.polygony) {
+            if (this.polygonSeProtinaSamSeSobou(P)) return true;
+        }
+
+        const kladne = this.polygony.filter(p => p.kladne);
+        const zaporny = this.polygony.filter(p => !p.kladne);
+
+        const rings = kladne.map(p =>
+            p.x_val.map((x, k) => [x, p.y_val[k]!] as [number, number])
+        );
+        const negRings = zaporny.map(p =>
+            p.x_val.map((x, k) => [x, p.y_val[k]!] as [number, number])
+        );
+
+        // 2) Průsečíky hran mezi kladnými polygony
+        for (let i = 0; i < kladne.length; i++) {
+            const ringA = rings[i]!;
+            const edgesA = ringA.length - 1;
+            for (let j = i + 1; j < kladne.length; j++) {
+                const ringB = rings[j]!;
+                const edgesB = ringB.length - 1;
+                if (this.ringsSeKrizi(ringA, edgesA, ringB, edgesB)) return true;
+
+                // 4) Plné pohlcení
+                const aInB = this.ringUvnitrRingu(ringA, ringB);
+                const bInA = this.ringUvnitrRingu(ringB, ringA);
+
+                if (aInB || bInA) {
+                    const innerRing = aInB ? ringA : ringB;
+                    // Legitimní ostrůvek = vnitřní polygon CELÝ uvnitř některého negativu
+                    const uvnitrDira = negRings.some(hr => this.ringUvnitrRingu(innerRing, hr));
+                    if (!uvnitrDira) return true;
+                } else {
+                    // Fallback: částečný překryv bez detekovaného hranového průsečíku
+                    // (numerické případy u velmi úzkých překryvů)
+                    const inter = polygonClipping.intersection([ringA], [ringB]);
+                    if (inter.length > 0) {
+                        const interArea = inter.reduce(
+                            (s, poly) => s + plochaRingu(poly[0] as any),
+                            0
+                        );
+                        if (interArea > 1e-3) return true;
+                    }
+                }
+            }
+        }
+
+        // 3) Průsečíky hran kladný ↔ záporný
+        for (let i = 0; i < kladne.length; i++) {
+            const ringP = rings[i]!;
+            const edgesP = ringP.length - 1;
+            for (let j = 0; j < zaporny.length; j++) {
+                const ringN = negRings[j]!;
+                const edgesN = ringN.length - 1;
+                if (this.ringsSeKrizi(ringP, edgesP, ringN, edgesN)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Pomocná: test, zda se jakákoli hrana ringu A protíná s jakoukoli hranou ringu B.
+    private ringsSeKrizi(
+        ringA: polygonClipping.Ring,
+        edgesA: number,
+        ringB: polygonClipping.Ring,
+        edgesB: number
+    ): boolean {
+        for (let a = 0; a < edgesA; a++) {
+            const a1 = ringA[a]!, a2 = ringA[a + 1]!;
+            for (let b = 0; b < edgesB; b++) {
+                const b1 = ringB[b]!, b2 = ringB[b + 1]!;
+                if (this.segmentySeKrizi(
+                    a1[0], a1[1], a2[0], a2[1],
+                    b1[0], b1[1], b2[0], b2[1]
+                )) return true;
+            }
+        }
+        return false;
+    }
+
+    // Všechny vrcholy vnitřního ringu musí ležet uvnitř vnějšího ringu.
+    private ringUvnitrRingu(inner: polygonClipping.Ring, outer: polygonClipping.Ring): boolean {
+        for (const pt of inner) {
+            if (!this.pointInRing(pt[0], pt[1], outer as any)) return false;
+        }
+        return true;
+    }
+
+    // Striktní proper-intersection test (bez endpoint tolerance).
+    // Tím pádem dva polygony sdílející hranu / vrchol NEHLÁSÍ kolizi.
+    private segmentySeKrizi(
+        ax1: number, ay1: number, ax2: number, ay2: number,
+        bx1: number, by1: number, bx2: number, by2: number
+    ): boolean {
+        const d1 = this.cross(bx2 - bx1, by2 - by1, ax1 - bx1, ay1 - by1);
+        const d2 = this.cross(bx2 - bx1, by2 - by1, ax2 - bx1, ay2 - by1);
+        const d3 = this.cross(ax2 - ax1, ay2 - ay1, bx1 - ax1, by1 - ay1);
+        const d4 = this.cross(ax2 - ax1, ay2 - ay1, bx2 - ax1, by2 - ay1);
+        return (
+            ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+            ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+        );
+    }
+
+    // Self-intersection jednoho polygonu (libovolného, i záporného).
+    private polygonSeProtinaSamSeSobou(P: Polygon): boolean {
+        const xs = P.x_val;
+        const ys = P.y_val;
+        const nEdges = xs.length - 1;
+        if (nEdges < 4) return false;
+        for (let a = 0; a < nEdges; a++) {
+            const a1x = xs[a]!, a1y = ys[a]!;
+            const a2x = xs[a + 1]!, a2y = ys[a + 1]!;
+            for (let b = a + 1; b < nEdges; b++) {
+                if (b === a + 1) continue;                 // sousedící hrana
+                if (a === 0 && b === nEdges - 1) continue; // první a poslední
+                const b1x = xs[b]!, b1y = ys[b]!;
+                const b2x = xs[b + 1]!, b2y = ys[b + 1]!;
+                if (this.segmentySeKrizi(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Vrací true, pokud bod (px, py) leží na úsečce (ax, ay) - (bx, by).
+    private bodNaUsecke(px: number, py: number, ax: number, ay: number, bx: number, by: number): boolean {
+        const cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+        if (Math.abs(cross) > 1e-9) return false;
+        const minX = Math.min(ax, bx) - 1e-9;
+        const maxX = Math.max(ax, bx) + 1e-9;
+        const minY = Math.min(ay, by) - 1e-9;
+        const maxY = Math.max(ay, by) + 1e-9;
+        return px >= minX && px <= maxX && py >= minY && py <= maxY;
+    }
+
+    private cross(ax: number, ay: number, bx: number, by: number): number {
+        return ax * by - ay * bx;
+    }
 
     // Vrátí aktuální materiál (E, ro) jako MultiPolygon.
     // Polygony se aplikují v pořadí, v jakém jsou v this.polygony:
@@ -901,6 +1074,77 @@ export class SpravceTeles {
 
         // 5. Následná aktualizace veškerých průsečíků a linek
         this.aktualizujPruseciky();
+    }
+
+    // Smaže vrchol z polygonu. Vrací true při úspěchu, false když by polygon
+    // po smazání měl méně než 3 vrcholy (pak se nic nezmění).
+    public smazVrchol(idTvaru: string, idVrcholu: string): boolean {
+        const idx = this.polygony.findIndex(p => p.id === idTvaru);
+        if (idx === -1) return false;
+        const polygon = this.polygony[idx]!;
+
+        // Získáme unikátní vrcholy. `vypocet()` na konec přidává referenci na první
+        // vrchol jako uzavírací bod - ten musíme odstranit, abychom nesmazali
+        // "první i poslední" zároveň.
+        let unikatni = polygon.vrcholy;
+        if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+            unikatni = unikatni.slice(0, -1);
+        }
+
+        const vrcholIdx = unikatni.findIndex(v => v.id === idVrcholu);
+        if (vrcholIdx === -1) return false;
+
+        const novyVrcholy = unikatni.slice(0, vrcholIdx).concat(unikatni.slice(vrcholIdx + 1));
+        if (novyVrcholy.length < 3) return false;
+
+        polygon.vrcholy = novyVrcholy;
+        polygon.vypocet();
+        this.aktualizujPruseciky();
+        return true;
+    }
+
+    // Zkusí sloučit daný vrchol s jiným vrcholem stejného polygonu, pokud
+    // jsou na (téměř) stejné pozici. Vrátí informaci, zda merge proběhl
+    // a jaké ID vrchol po merge přežil. `blocked: true` znamená, že merge
+    // nebyl proveden kvůli ochraně (polygon by měl méně než 3 vrcholy).
+    public zkusMergeVrcholy(
+        idTvaru: string,
+        idVrcholu: string,
+        tolerance = 1e-3
+    ): { merged: boolean; survivingId?: string; blocked?: boolean } {
+        const poly = this.polygony.find(p => p.id === idTvaru);
+        if (!poly) return { merged: false };
+
+        // Získáme unikátní vrcholy (bez uzavíracího duplikátu prvního vrcholu)
+        let unikatni = poly.vrcholy;
+        if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+            unikatni = unikatni.slice(0, -1);
+        }
+
+        const idx = unikatni.findIndex(v => v.id === idVrcholu);
+        if (idx === -1) return { merged: false };
+        const moved = unikatni[idx]!;
+
+        // Hledáme jiný vrchol na (téměř) stejné pozici
+        const otherIdx = unikatni.findIndex((v, i) =>
+            i !== idx &&
+            Math.abs(v.x - moved.x) < tolerance &&
+            Math.abs(v.y - moved.y) < tolerance
+        );
+        if (otherIdx === -1) return { merged: false };
+
+        // Ochrana: musí zůstat alespoň 3 vrcholy.
+        // Signál `blocked` zajistí, že volající (App.svelte) vrchol vrátí
+        // na původní pozici, aby z polygonu nevznikla úsečka.
+        if (unikatni.length <= 3) return { merged: false, blocked: true };
+
+        // Sloučíme: ponecháme "other", smažeme "moved"
+        const surviving = unikatni[otherIdx]!;
+        poly.vrcholy = unikatni.filter((_, i) => i !== idx);
+        poly.vypocet();
+        this.aktualizujPruseciky();
+
+        return { merged: true, survivingId: surviving.id };
     }
 
     // --- POMOCNÁ METODA PRO VÝPOČET NÁHRADNÍCH SIL ---
