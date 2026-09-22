@@ -724,23 +724,10 @@ export class SpravceTeles {
         vrch.x = x;
         vrch.y = y;
 
-        // 4) Kontrola degenerace
-        const unikatni = poly.vrcholy.slice(0, -1);
-        const seen = new Set<string>();
-        let duplikat = false;
-        for (const v of unikatni) {
-            const key = `${Math.round(v.x * 1e6)},${Math.round(v.y * 1e6)}`;
-            if (seen.has(key)) { duplikat = true; break; }
-            seen.add(key);
-        }
-        if (duplikat) {
-            vrch.x = origX;
-            vrch.y = origY;
-            poly.vypocet();
-            this.aktualizujPruseciky();
-            return { bowtie: false, blocked: true };
-        }
-
+        // 4) Přepočet polygonu s dočasnou pozicí.
+        //    Kontrolu degenerace (dva vrcholy na sobě) děláme až při commitu
+        //    v zkusMergeVrcholy(). Během dragu chceme uživateli dovolit dovést
+        //    vrchol A přesně na vrchol B, aby se pak mohl sloučit.
         poly.vypocet();
 
         // 5) Bowtie
@@ -1412,6 +1399,36 @@ export class SpravceTeles {
     // Potvrdí editaci: pouze zapomene snapshot, aktuální stav polygonů zůstává.
     public potvrdEditaci(): void {
         this.editSession = null;
+    }
+
+    // Vrátí seznam vrcholů pro snap na jiný vrchol.
+    // - Během editace vrcholu: vrací vrcholy ze SNAPSHOTU (originální pozice
+    //   na začátku editace). Vynechává aktivně editovaný vrchol. Tím je
+    //   snap stabilní - nesnapuje na pozice z post-merge stavu, který se
+    //   každý frame mění.
+    // - Mimo editaci: vrací vrcholy z aktuálního stavu (bez uzavíracích duplikátů).
+    public getSnapCandidates(): Array<{ idTvaru: string; idVrcholu: string; x: number; y: number }> {
+        const result: Array<{ idTvaru: string; idVrcholu: string; x: number; y: number }> = [];
+
+        if (this.editSession) {
+            const excludeId = this.editSession.idVrcholu;
+            for (const s of this.editSession.snapshot) {
+                for (const v of s.vrcholy) {
+                    if (v.id === excludeId) continue;
+                    result.push({ idTvaru: s.id, idVrcholu: v.id, x: v.x, y: v.y });
+                }
+            }
+        } else {
+            for (const p of this.polygony) {
+                const n = p.vrcholy.length;
+                const cnt = (n >= 2 && p.vrcholy[0] === p.vrcholy[n - 1]) ? n - 1 : n;
+                for (let i = 0; i < cnt; i++) {
+                    const v = p.vrcholy[i]!;
+                    result.push({ idTvaru: p.id, idVrcholu: v.id, x: v.x, y: v.y });
+                }
+            }
+        }
+        return result;
     }
 
     // Zruší editaci: vrátí polygony do stavu ze snapshotu.
