@@ -625,6 +625,34 @@ export class SpravceTeles {
         return [...zbytekSorted, ...subtreeSorted];
     }
 
+        // Vrátí množinu ID všech polygonů v podstromu aktuálně editovaného polygonu
+    // (editovaný + rekurzivně vše, co v snapshotu leží uvnitř něj).
+    // Používá se pro klipování pozitivních potomků hranicí editovaného polygonu.
+    private computeSubtreeIdsFromSnapshot(): Set<string> {
+        const snap = this.editSession?.snapshot ?? [];
+        const snapMap = new Map(snap.map(s => [s.id, s]));
+        const editedId = this.editSession?.idTvaru;
+        const result = new Set<string>();
+        if (!editedId || !snapMap.has(editedId)) return result;
+        result.add(editedId);
+        const queue: string[] = [editedId];
+        while (queue.length > 0) {
+            const curId = queue.shift()!;
+            const curSnap = snapMap.get(curId);
+            if (!curSnap) continue;
+            const curRing: [number, number][] = curSnap.vrcholy.map(v => [v.x, v.y]);
+            for (const s of snap) {
+                if (result.has(s.id)) continue;
+                const sRing: [number, number][] = s.vrcholy.map(v => [v.x, v.y]);
+                if (this.ringUvnitrRingu(sRing, curRing)) {
+                    result.add(s.id);
+                    queue.push(s.id);
+                }
+            }
+        }
+        return result;
+    }
+
     // Seřadí polygony podle hloubky vnoření v SNAPSHOTU (ne v aktuálním stavu).
     // Vnější tvary první. Při shodě hloubky rozhoduje původní pořadí v poli.
     private sortByDepthInSnapshot(
@@ -729,11 +757,29 @@ export class SpravceTeles {
 
         if (sameMat.length >= 2) {
             const orderedSameMat = this.computeApplicationOrder(sameMat);
+            const subtreeIds = this.computeSubtreeIdsFromSnapshot();
+            const editedId = this.editSession!.idTvaru;
+
+            // Klipování: pokud je editovaný polygon pozitivní, klipujeme všechny
+            // jeho pozitivní potomky (ostrůvky) jeho aktuální hranicí. Tím se
+            // ostrůvky zmenšují / mizí, když hrana vnějšího polygonu přejede přes ně.
+            const editedPoly = this.polygony.find(p => p.id === editedId);
+            const editedRing: [number, number][] | null =
+                (editedPoly && editedPoly.kladne)
+                    ? editedPoly.x_val.map((xx, i) => [xx, editedPoly.y_val[i]!] as [number, number])
+                    : null;
 
             let merged: polygonClipping.MultiPolygon = [];
             for (const p of orderedSameMat) {
-                const ring = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
-                if (p.kladne) {
+                const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
+
+                if (editedRing && p.kladne && p.id !== editedId && subtreeIds.has(p.id)) {
+                    // Pozitivní potomek editovaného pozitivu → ořezat hranicí.
+                    const pieces = polygonClipping.intersection([ring], [editedRing]);
+                    for (const piece of pieces) {
+                        merged = polygonClipping.union(merged, [piece]);
+                    }
+                } else if (p.kladne) {
                     merged = polygonClipping.union(merged, [ring]);
                 } else {
                     merged = polygonClipping.difference(merged, [ring]);
