@@ -1498,19 +1498,20 @@ export class SpravceTeles {
         return true;
     }
 
-    // Zkusí sloučit daný vrchol s jiným vrcholem stejného polygonu, pokud
-    // jsou na (téměř) stejné pozici. Vrátí informaci, zda merge proběhl
-    // a jaké ID vrchol po merge přežil. `blocked: true` znamená, že merge
-    // nebyl proveden kvůli ochraně (polygon by měl méně než 3 vrcholy).
+    // Zpracuje přesun vrcholu na pozici jiného vrcholu stejného polygonu:
+    //   - sousední vrcholy  → klasický merge (jeden se smaže),
+    //   - nesousední vrcholy → rozdělení polygonu na dvě smyčky.
+    //     Pokud jedna smyčka leží CELÁ uvnitř druhé (např. C-čko po uzavření),
+    //     uloží se menší smyčka jako ZÁPORNÁ (díra) a větší jako kladná.
+    //     Tím pádem i rozdělení, které uzavře díru, zůstane validní.
     public zkusMergeVrcholy(
         idTvaru: string,
         idVrcholu: string,
         tolerance = 1e-3
-    ): { merged: boolean; survivingId?: string; blocked?: boolean } {
+    ): { merged: boolean; survivingId?: string; blocked?: boolean; split?: boolean } {
         const poly = this.polygony.find(p => p.id === idTvaru);
         if (!poly) return { merged: false };
 
-        // Získáme unikátní vrcholy (bez uzavíracího duplikátu prvního vrcholu)
         let unikatni = poly.vrcholy;
         if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
             unikatni = unikatni.slice(0, -1);
@@ -1520,7 +1521,6 @@ export class SpravceTeles {
         if (idx === -1) return { merged: false };
         const moved = unikatni[idx]!;
 
-        // Hledáme jiný vrchol na (téměř) stejné pozici
         const otherIdx = unikatni.findIndex((v, i) =>
             i !== idx &&
             Math.abs(v.x - moved.x) < tolerance &&
@@ -1528,18 +1528,89 @@ export class SpravceTeles {
         );
         if (otherIdx === -1) return { merged: false };
 
-        // Ochrana: musí zůstat alespoň 3 vrcholy.
-        // Signál `blocked` zajistí, že volající (App.svelte) vrchol vrátí
-        // na původní pozici, aby z polygonu nevznikla úsečka.
-        if (unikatni.length <= 3) return { merged: false, blocked: true };
+        const n = unikatni.length;
+        const sousedni = (idx + 1) % n === otherIdx || (otherIdx + 1) % n === idx;
 
-        // Sloučíme: ponecháme "other", smažeme "moved"
-        const surviving = unikatni[otherIdx]!;
-        poly.vrcholy = unikatni.filter((_, i) => i !== idx);
-        poly.vypocet();
+        // --- A) Sousední → merge ---
+        if (sousedni) {
+            if (n <= 3) return { merged: false, blocked: true };
+            const surviving = unikatni[otherIdx]!;
+            poly.vrcholy = unikatni.filter((_, i) => i !== idx);
+            poly.vypocet();
+            this.aktualizujPruseciky();
+            return { merged: true, survivingId: surviving.id };
+        }
+
+        // --- B) Nesousední → rozdělení na dvě smyčky ---
+        const minI = Math.min(idx, otherIdx);
+        const maxI = Math.max(idx, otherIdx);
+
+        const smycka1 = unikatni.slice(minI, maxI + 1).map(v => ({ x: v.x, y: v.y }));
+        const smycka2 = [
+            ...unikatni.slice(maxI).map(v => ({ x: v.x, y: v.y })),
+            ...unikatni.slice(0, minI + 1).map(v => ({ x: v.x, y: v.y }))
+        ];
+
+        const dedup1 = deduplikujVrcholy(smycka1.map(v => v.x), smycka1.map(v => v.y));
+        const dedup2 = deduplikujVrcholy(smycka2.map(v => v.x), smycka2.map(v => v.y));
+        if (dedup1.x.length < 3 || dedup2.x.length < 3) {
+            return { merged: false, blocked: true };
+        }
+
+        const ring1 = dedup1.x.map((x, i) => [x, dedup1.y[i]!] as [number, number]);
+        const ring2 = dedup2.x.map((x, i) => [x, dedup2.y[i]!] as [number, number]);
+
+        const area1 = plochaRingu(ring1);
+        const area2 = plochaRingu(ring2);
+
+        // Ověříme, zda jedna smyčka leží celá uvnitř druhé (průnik má plochu
+        // rovnou menší z obou). Pokud ano, menší smyčka je díra.
+        let jedenUvnitrDruheho = false;
+        try {
+            const inter = polygonClipping.intersection([ring1], [ring2]);
+            const interArea = inter.reduce((s, p) => s + plochaRingu(p[0] as any), 0);
+            const eps = 1e-3;
+            const mensi = Math.min(area1, area2);
+            const vetsi = Math.max(area1, area2);
+            // Průnik odpovídá menší smyčce a zároveň se plochy liší (nejsou identické)
+            jedenUvnitrDruheho =
+                Math.abs(interArea - mensi) < eps &&
+                Math.abs(vetsi - mensi) > eps;
+        } catch {
+            // Kdyby polygon-clipping selhal, radši vrátíme blocked (nic se nezmění)
+            return { merged: false, blocked: true };
+        }
+
+        // NOVÉ: Pokud jedna smyčka leží celá uvnitř druhé, NEprovádíme split.
+        // Polygon zůstane jako "self-touching" ring (dvě smyčky se dotýkají
+        // v jednom bodě). Vykreslování přes fill-rule="evenodd" to zobrazí
+        // správně (vnější obrys s dírou) a Polygon.vypocet s tím taky počítá
+        // správně. Tím se vyhneme problému, kdy po split by vnější polygon
+        // a díra sdílely vrchol a při editaci vnějšího polygonu by se díra
+        // rozbila.
+        if (jedenUvnitrDruheho) {
+            poly.vypocet();
+            this.aktualizujPruseciky();
+            return { merged: true };
+        }
+
+        const idxPuvodni = this.polygony.indexOf(poly);
+        const others = this.polygony.filter((_, i) => i !== idxPuvodni);
+
+        let novy1: Polygon;
+        let novy2: Polygon;
+        try {
+            // Sem se dostaneme jen když ani jedna smyčka neobsahuje tu druhou
+            // (dvě samostatné hmoty) → obě mají stejnou kladnost jako originál.
+            novy1 = new Polygon(dedup1.x, dedup1.y, poly.kladne, poly.ro, poly.E);
+            novy2 = new Polygon(dedup2.x, dedup2.y, poly.kladne, poly.ro, poly.E);
+        } catch {
+            return { merged: false, blocked: true };
+        }
+
+        this.polygony = [...others, novy1, novy2];
         this.aktualizujPruseciky();
-
-        return { merged: true, survivingId: surviving.id };
+        return { merged: true, split: true };
     }
 
     // --- POMOCNÁ METODA PRO VÝPOČET NÁHRADNÍCH SIL ---
