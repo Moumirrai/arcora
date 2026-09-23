@@ -1508,7 +1508,7 @@ export class SpravceTeles {
         idTvaru: string,
         idVrcholu: string,
         tolerance = 1e-3
-    ): { merged: boolean; survivingId?: string; blocked?: boolean; split?: boolean } {
+    ): { merged: boolean; survivingId?: string; blocked?: boolean; split?: boolean; deleted?: boolean } {
         const poly = this.polygony.find(p => p.id === idTvaru);
         if (!poly) return { merged: false };
 
@@ -1531,9 +1531,17 @@ export class SpravceTeles {
         const n = unikatni.length;
         const sousedni = (idx + 1) % n === otherIdx || (otherIdx + 1) % n === idx;
 
-        // --- A) Sousední → merge ---
+        // --- A) Sousední vrcholy → klasický merge ---
         if (sousedni) {
-            if (n <= 3) return { merged: false, blocked: true };
+            // Trojúhelník, jehož vrchol přesuneme na sousední vrchol → zůstaly by
+            // jen 2 unikátní body (úsečka). Polygon se tím pádem z modelu ODSTRANÍ
+            // (i když je poslední). Uživatel tak může "smazat" polygon i tímto způsobem.
+            if (n <= 3) {
+                const idxPuvodni = this.polygony.indexOf(poly);
+                if (idxPuvodni !== -1) this.polygony.splice(idxPuvodni, 1);
+                this.aktualizujPruseciky();
+                return { merged: false, deleted: true };
+            }
             const surviving = unikatni[otherIdx]!;
             poly.vrcholy = unikatni.filter((_, i) => i !== idx);
             poly.vypocet();
@@ -1553,8 +1561,31 @@ export class SpravceTeles {
 
         const dedup1 = deduplikujVrcholy(smycka1.map(v => v.x), smycka1.map(v => v.y));
         const dedup2 = deduplikujVrcholy(smycka2.map(v => v.x), smycka2.map(v => v.y));
-        if (dedup1.x.length < 3 || dedup2.x.length < 3) {
-            return { merged: false, blocked: true };
+
+        const valid1 = dedup1.x.length >= 3;
+        const valid2 = dedup2.x.length >= 3;
+
+        // Pokud jsou obě smyčky degenerované, polygon úplně zmizí.
+        if (!valid1 && !valid2) {
+            const idxPuvodni = this.polygony.indexOf(poly);
+            if (idxPuvodni !== -1) this.polygony.splice(idxPuvodni, 1);
+            this.aktualizujPruseciky();
+            return { merged: false, deleted: true };
+        }
+
+        // Pokud jen jedna smyčka je degenerovaná, ponecháme pouze tu druhou.
+        if (!valid1 || !valid2) {
+            const platna = valid1 ? dedup1 : dedup2;
+            try {
+                poly.update(platna.x, platna.y, poly.kladne, poly.ro, poly.E);
+            } catch {
+                const idxPuvodni = this.polygony.indexOf(poly);
+                if (idxPuvodni !== -1) this.polygony.splice(idxPuvodni, 1);
+                this.aktualizujPruseciky();
+                return { merged: false, deleted: true };
+            }
+            this.aktualizujPruseciky();
+            return { merged: true };
         }
 
         const ring1 = dedup1.x.map((x, i) => [x, dedup1.y[i]!] as [number, number]);
@@ -1572,22 +1603,15 @@ export class SpravceTeles {
             const eps = 1e-3;
             const mensi = Math.min(area1, area2);
             const vetsi = Math.max(area1, area2);
-            // Průnik odpovídá menší smyčce a zároveň se plochy liší (nejsou identické)
             jedenUvnitrDruheho =
                 Math.abs(interArea - mensi) < eps &&
                 Math.abs(vetsi - mensi) > eps;
         } catch {
-            // Kdyby polygon-clipping selhal, radši vrátíme blocked (nic se nezmění)
             return { merged: false, blocked: true };
         }
 
-        // NOVÉ: Pokud jedna smyčka leží celá uvnitř druhé, NEprovádíme split.
-        // Polygon zůstane jako "self-touching" ring (dvě smyčky se dotýkají
-        // v jednom bodě). Vykreslování přes fill-rule="evenodd" to zobrazí
-        // správně (vnější obrys s dírou) a Polygon.vypocet s tím taky počítá
-        // správně. Tím se vyhneme problému, kdy po split by vnější polygon
-        // a díra sdílely vrchol a při editaci vnějšího polygonu by se díra
-        // rozbila.
+        // Self-touching ring: necháme původní polygon být, jen ho překreslíme
+        // (díra zůstává jako vnitřní smyčka téhož polygonu).
         if (jedenUvnitrDruheho) {
             poly.vypocet();
             this.aktualizujPruseciky();
@@ -1600,8 +1624,6 @@ export class SpravceTeles {
         let novy1: Polygon;
         let novy2: Polygon;
         try {
-            // Sem se dostaneme jen když ani jedna smyčka neobsahuje tu druhou
-            // (dvě samostatné hmoty) → obě mají stejnou kladnost jako originál.
             novy1 = new Polygon(dedup1.x, dedup1.y, poly.kladne, poly.ro, poly.E);
             novy2 = new Polygon(dedup2.x, dedup2.y, poly.kladne, poly.ro, poly.E);
         } catch {
