@@ -441,6 +441,7 @@ export class SpravceTeles {
     private editSession: {
         idTvaru: string;
         idVrcholu: string;
+        idVrcholu2: string | null; // null = editace vrcholu; jinak = editace hrany (oba vrcholy)
         snapshot: SnapshotPoly[];
     } | null = null;
 
@@ -1393,7 +1394,169 @@ export class SpravceTeles {
                 vrcholy: unikatni,
             };
         });
-        this.editSession = { idTvaru, idVrcholu, snapshot };
+        this.editSession = { idTvaru, idVrcholu, idVrcholu2: null, snapshot };
+    }
+
+    // Zahájí editaci hrany polygonu. Uloží snapshot a ID obou koncových vrcholů.
+    public zacniEditaciHrany(idTvaru: string, edgeIndex: number): void {
+        const poly = this.polygony.find(p => p.id === idTvaru);
+        if (!poly) return;
+
+        const snapshot: SnapshotPoly[] = this.polygony.map(p => {
+            const unikatni: { id: string; x: number; y: number }[] = [];
+            const seen = new Set<string>();
+            for (const v of p.vrcholy) {
+                if (seen.has(v.id)) continue;
+                seen.add(v.id);
+                unikatni.push({ id: v.id, x: v.x, y: v.y });
+            }
+            return { id: p.id, kladne: p.kladne, ro: p.ro, E: p.E, vrcholy: unikatni };
+        });
+
+        let unikatni = poly.vrcholy;
+        if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+            unikatni = unikatni.slice(0, -1);
+        }
+        const n = unikatni.length;
+        if (edgeIndex < 0 || edgeIndex >= n) return;
+
+        const v1 = unikatni[edgeIndex]!;
+        const v2 = unikatni[(edgeIndex + 1) % n]!;
+
+        this.editSession = {
+            idTvaru,
+            idVrcholu: v1.id,
+            idVrcholu2: v2.id,
+            snapshot,
+        };
+    }
+
+    // Posune hranu (oba její vrcholy) o danou deltu od snapshotu.
+    // Dělá PŘESNĚ to samé co pohnVrcholem, jen posouvá oba koncové vrcholy naráz.
+    // Vrací i tracking (nová ID a edgeIndex), aby UI mohla aktualizovat highlight
+    // i po případné re-dekompozici polygonů z merge pipeline.
+    public pohnHranou(deltaX: number, deltaY: number): {
+        bowtie: boolean;
+        blocked: boolean;
+        newIdTvaru?: string;
+        newEdgeIndex?: number;
+        newIdVrcholu1?: string;
+        newIdVrcholu2?: string;
+    } {
+        if (!this.editSession || !this.editSession.idVrcholu2) {
+            return { bowtie: false, blocked: false };
+        }
+
+        // 1) Vrátit snapshot
+        this.obnovSnapshot();
+
+        // 2) Najít polygon a oba vrcholy podle ID z editSession
+        const poly = this.polygony.find(p => p.id === this.editSession!.idTvaru);
+        if (!poly) return { bowtie: false, blocked: false };
+        const v1 = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu);
+        const v2 = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu2);
+        if (!v1 || !v2) return { bowtie: false, blocked: false };
+
+        // 3) Posunout oba vrcholy
+        v1.x += deltaX;
+        v1.y += deltaY;
+        v2.x += deltaX;
+        v2.y += deltaY;
+
+        const p1x = v1.x, p1y = v1.y;
+        const p2x = v2.x, p2y = v2.y;
+
+        // 4) Přepočet
+        poly.vypocet();
+
+        // 5) Bowtie
+        if (this.polygonSeProtinaSamSeSobou(poly)) {
+            this.aktualizujPruseciky();
+            return { bowtie: true, blocked: false };
+        }
+
+        // 6) Merge pipeline (identická s pohnVrcholem)
+        const E = poly.E;
+        const ro = poly.ro;
+        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
+        const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
+
+        if (sameMat.length >= 2) {
+            const orderedSameMat = this.computeApplicationOrder(sameMat);
+            const subtreeIds = this.computeSubtreeIdsFromSnapshot();
+            const editedId = this.editSession!.idTvaru;
+
+            const editedPoly = this.polygony.find(p => p.id === editedId);
+            const editedRing: [number, number][] | null =
+                (editedPoly && editedPoly.kladne)
+                    ? editedPoly.x_val.map((xx, i) => [xx, editedPoly.y_val[i]!] as [number, number])
+                    : null;
+
+            let merged: polygonClipping.MultiPolygon = [];
+            for (const p of orderedSameMat) {
+                const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
+
+                if (editedRing && p.kladne && p.id !== editedId && subtreeIds.has(p.id)) {
+                    const pieces = polygonClipping.intersection([ring], [editedRing]);
+                    for (const piece of pieces) {
+                        merged = polygonClipping.union(merged, [piece]);
+                    }
+                } else if (p.kladne) {
+                    merged = polygonClipping.union(merged, [ring]);
+                } else {
+                    merged = polygonClipping.difference(merged, [ring]);
+                }
+            }
+            merged = vycistiMultiPolygon(merged);
+
+            const newPolys: Polygon[] = [];
+            for (const part of merged) {
+                const outer = part[0]!;
+                newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+                for (let h = 1; h < part.length; h++) {
+                    const hole = part[h]!;
+                    newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+                }
+            }
+            const sorted = this.sortByDepth(newPolys);
+            this.polygony = [...others, ...sorted];
+        }
+
+        // 7) Tracking: najdi, kde skončily oba pohybované vrcholy, a vrať
+        //    nová ID + edgeIndex, aby UI mohla udržet highlight hrany.
+        const v1New = this.najdiVrcholBlizko(p1x, p1y, 1e-3);
+        const v2New = this.najdiVrcholBlizko(p2x, p2y, 1e-3);
+
+        this.aktualizujPruseciky();
+
+        if (v1New && v2New && v1New.idTvaru === v2New.idTvaru) {
+            const newPoly = this.polygony.find(p => p.id === v1New.idTvaru);
+            if (newPoly) {
+                let unikatni = newPoly.vrcholy;
+                if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+                    unikatni = unikatni.slice(0, -1);
+                }
+                const n = unikatni.length;
+                for (let i = 0; i < n; i++) {
+                    const a = unikatni[i]!;
+                    const b = unikatni[(i + 1) % n]!;
+                    const match1 = (a.id === v1New.idVrcholu && b.id === v2New.idVrcholu);
+                    const match2 = (a.id === v2New.idVrcholu && b.id === v1New.idVrcholu);
+                    if (match1 || match2) {
+                        return {
+                            bowtie: false,
+                            blocked: false,
+                            newIdTvaru: v1New.idTvaru,
+                            newEdgeIndex: i,
+                            newIdVrcholu1: a.id,
+                            newIdVrcholu2: b.id,
+                        };
+                    }
+                }
+            }
+        }
+
+        return { bowtie: false, blocked: false };
     }
 
     // Potvrdí editaci: pouze zapomene snapshot, aktuální stav polygonů zůstává.
@@ -1411,10 +1574,11 @@ export class SpravceTeles {
         const result: Array<{ idTvaru: string; idVrcholu: string; x: number; y: number }> = [];
 
         if (this.editSession) {
-            const excludeId = this.editSession.idVrcholu;
+            const exclude1 = this.editSession.idVrcholu;
+            const exclude2 = this.editSession.idVrcholu2;
             for (const s of this.editSession.snapshot) {
                 for (const v of s.vrcholy) {
-                    if (v.id === excludeId) continue;
+                    if (v.id === exclude1 || v.id === exclude2) continue;
                     result.push({ idTvaru: s.id, idVrcholu: v.id, x: v.x, y: v.y });
                 }
             }
