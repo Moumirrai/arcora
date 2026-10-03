@@ -1,7 +1,7 @@
 import type { Model } from "../model";
 import type { WithOptional } from "../types";
 
-enum LoadCaseType {
+export enum LoadCaseType {
   Dead = "Dead",
   Live = "Live",
   Wind = "Wind",
@@ -25,6 +25,7 @@ export class LoadCase {
   #selfWeight: boolean;
 
   #model: Model;
+  #dirty = false;
 
   constructor(model: Model, data: LoadCaseDataPartial) {
     this.#model = model;
@@ -38,18 +39,28 @@ export class LoadCase {
     return this.#type;
   }
 
+  set type(value: LoadCaseType) {
+    this.#type = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
+  }
+
   get selfWeight(): boolean {
     return this.#selfWeight;
   }
 
-  set type(value: LoadCaseType) {
-    this.#type = value;
+  set selfWeight(value: boolean) {
+    this.#selfWeight = value;
+    this.#dirty = true;
     this.#model.dirty = true;
   }
 
-  set selfWeight(value: boolean) {
-    this.#selfWeight = value;
-    this.#model.dirty = true;
+  get dirty(): boolean {
+    return this.#dirty;
+  }
+
+  cleanDirty(): void {
+    this.#dirty = false;
   }
 
   toData(): LoadCaseData {

@@ -3,6 +3,8 @@ import { Element } from "./entities/element";
 import { Material } from "./entities/material";
 import { Crossection } from "./entities/crossection";
 import { ElementsMap } from "./entities/element";
+import { LoadCase } from "./entities/loadCase";
+import type { Load } from "./entities/load";
 import type { BCData } from "./entities/boundaryCondition";
 
 export class Model {
@@ -12,6 +14,9 @@ export class Model {
   public readonly crossections: Map<string, Crossection> = new Map();
 
   public readonly boundaryConditions: Map<string, BCData> = new Map();
+
+  public readonly loadCases: Map<string, LoadCase> = new Map();
+  public readonly loads: Map<string, Load> = new Map();
 
   public dirty = false;
 
@@ -35,6 +40,8 @@ export class Model {
     for (const material of this.materials.values()) material.cleanDirty();
     for (const crossection of this.crossections.values())
       crossection.cleanDirty();
+    for (const loadCase of this.loadCases.values()) loadCase.cleanDirty();
+    for (const load of this.loads.values()) load.cleanDirty();
     this.dirty = false;
   }
 }
