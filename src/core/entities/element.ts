@@ -50,6 +50,7 @@ export interface ElementData {
   materialID: string;
   crossectionID: string;
   id: string;
+  hinges?: readonly [boolean, boolean];
 }
 
 export type ElementDataPartial = WithOptional<ElementData, "id">;
@@ -60,6 +61,7 @@ export class Element {
 
   #materialID: string;
   #crossectionID: string;
+  #hinges: [boolean, boolean];
 
   #model: Model;
 
@@ -67,6 +69,7 @@ export class Element {
   #sine: number = 0;
   #cosine: number = 0;
   #transformMatrix: Matrix | undefined;
+  #baseStiffnessMatrix: Matrix | undefined;
   #stiffnessMatrix: Matrix | undefined;
   #globalStiffnessMatrix: Matrix | undefined;
   #dirty = false;
@@ -77,6 +80,7 @@ export class Element {
     this.nodeIDs = data.nodeIDs;
     this.#materialID = data.materialID;
     this.#crossectionID = data.crossectionID;
+    this.#hinges = data.hinges ? [...data.hinges] : [false, false];
     this.updateCache();
   }
 
@@ -86,6 +90,7 @@ export class Element {
       nodeIDs: this.nodeIDs,
       materialID: this.#materialID,
       crossectionID: this.#crossectionID,
+      hinges: this.#hinges,
     };
   }
 
@@ -125,11 +130,16 @@ export class Element {
       [0, 0, 0, 0, 0, 1],
     ]);
 
-    this.#stiffnessMatrix = this.computeLocalStiffnessMatrix(
+    this.#baseStiffnessMatrix = this.computeLocalStiffnessMatrix(
       material.E,
       crossection.area,
       crossection.Iy
     );
+
+    this.#stiffnessMatrix =
+      this.releasedDofs.length > 0
+        ? this.condenseStiffness()
+        : this.#baseStiffnessMatrix;
 
     this.#globalStiffnessMatrix = this.#transformMatrix
       .transpose()
@@ -180,6 +190,95 @@ export class Element {
     return kLocal;
   }
 
+  get releasedDofs(): number[] {
+    const released: number[] = [];
+    if (this.#hinges[0]) released.push(2); // local dof index
+    if (this.#hinges[1]) released.push(5);
+    return released;
+  }
+
+  private condenseStiffness(): Matrix {
+    if (!this.#baseStiffnessMatrix)
+      throw new Error("Element stiffness matrix is not cached");
+    const out_K = this.#baseStiffnessMatrix.clone();
+    const released = this.releasedDofs;
+    for (const p of released) {
+      const pivot = out_K.at(p, p);
+      for (let j = 0; j < 6; j++) {
+        // row loop
+        if (j === p) continue;
+        const ajp = out_K.at(j, p);
+        if (ajp === 0) continue;
+        for (let k = 0; k < 6; k++) {
+          // column loop
+          if (k === p) continue;
+          //static condensation formula: K_jk - K_jp * K_pk / K_pp
+          out_K.setAt(j, k, out_K.at(j, k) - (ajp * out_K.at(p, k)) / pivot);
+        }
+      }
+    }
+    for (const p of released) {
+      // zero out rows and columns of released DOFs
+      for (let j = 0; j < 6; j++) {
+        out_K.setAt(p, j, 0);
+        out_K.setAt(j, p, 0);
+      }
+    }
+    return out_K;
+  }
+
+  condenseLocalForces(f: Float64Array): Float64Array {
+    const released = this.releasedDofs;
+    const out_f = new Float64Array(f);
+    if (released.length === 0) return out_f;
+    const K = this.#baseStiffnessMatrix;
+    if (!K) throw new Error("Element stiffness matrix is not cached");
+
+    const r = released.length;
+    const Kaa = new Float64Array(r * r);
+    const fa = new Float64Array(r);
+    for (let i = 0; i < r; i++) {
+      fa[i] = f[released[i]!]!;
+      for (let j = 0; j < r; j++) {
+        Kaa[i * r + j] = K.at(released[i]!, released[j]!);
+      }
+    }
+
+    const x = Element.solveReleased(Kaa, fa, r);
+    for (let j = 0; j < 6; j++) {
+      if (released.includes(j)) {
+        out_f[j] = 0;
+        continue;
+      }
+      let s = f[j]!;
+      for (let i = 0; i < r; i++) {
+        s -= K.at(j, released[i]!) * x[i]!;
+      }
+      out_f[j] = s;
+    }
+    return out_f;
+  }
+
+  private static solveReleased(
+    Kaa: Float64Array,
+    fa: Float64Array,
+    n: number
+  ): Float64Array {
+    const x = new Float64Array(n);
+    if (n === 1) {
+      x[0] = fa[0]! / Kaa[0]!;
+      return x;
+    }
+    const a = Kaa[0]!;
+    const b = Kaa[1]!;
+    const c = Kaa[2]!;
+    const d = Kaa[3]!;
+    const det = a * d - b * c;
+    x[0] = (d * fa[0]! - b * fa[1]!) / det;
+    x[1] = (a * fa[1]! - c * fa[0]!) / det;
+    return x;
+  }
+
   get dirty(): boolean {
     const nodeA = this.#model.nodes.get(this.nodeIDs[0]);
     const nodeB = this.#model.nodes.get(this.nodeIDs[1]);
@@ -218,6 +317,27 @@ export class Element {
     return this.#globalStiffnessMatrix;
   }
 
+  // raw Float64Array global 6x6 stiffness
+  get ke(): Float64Array {
+    const m = this.#globalStiffnessMatrix;
+    if (!m) throw new Error("Element stiffness matrix is not cached");
+    return m.data;
+  }
+
+  // raw Float64Array local 6x6 stiffness
+  get localStiffness(): Float64Array {
+    const m = this.#stiffnessMatrix;
+    if (!m) throw new Error("Element stiffness matrix is not cached");
+    return m.data;
+  }
+
+  // raw Float64Array 6x6 transform matrix
+  get transform(): Float64Array {
+    const m = this.#transformMatrix;
+    if (!m) throw new Error("Element transform matrix is not cached");
+    return m.data;
+  }
+
   get materialID(): string {
     return this.#materialID;
   }
@@ -234,6 +354,28 @@ export class Element {
 
   set crossectionID(value: string) {
     this.#crossectionID = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
+  }
+
+  get hingeStart(): boolean {
+    return this.#hinges[0];
+  }
+
+  set hingeStart(value: boolean) {
+    if (this.#hinges[0] === value) return;
+    this.#hinges[0] = value;
+    this.#dirty = true;
+    this.#model.dirty = true;
+  }
+
+  get hingeEnd(): boolean {
+    return this.#hinges[1];
+  }
+
+  set hingeEnd(value: boolean) {
+    if (this.#hinges[1] === value) return;
+    this.#hinges[1] = value;
     this.#dirty = true;
     this.#model.dirty = true;
   }

@@ -8,6 +8,7 @@ type AddElementOptions = {
   materialID: string;
   crossectionID: string;
   id?: string;
+  hinges?: [boolean, boolean];
 };
 
 export class AddElementOperation implements IOperation {
@@ -51,6 +52,7 @@ export class AddElementOperation implements IOperation {
       nodeIDs: this.opts.nodeIDs,
       materialID: this.opts.materialID,
       crossectionID: this.opts.crossectionID,
+      hinges: this.opts.hinges ?? [false, false],
     });
     model.elements.set(this.id, newElement);
     this.createdElement = newElement;

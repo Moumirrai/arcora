@@ -40,6 +40,6 @@ describe("Element class", () => {
       materialID: material.id,
       crossectionID: crossection.id,
     });
-    element.globalStiffnessMatrix;
+    void element.globalStiffnessMatrix;
   });
 });

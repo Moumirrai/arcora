@@ -183,6 +183,114 @@ describe("Element class", () => {
     expect(element.dirty).toBe(false);
   });
 
+  it("condenses stiffness matrix with hinge at node 1", () => {
+    nodeA.pos = { x: 0, z: 0 };
+    nodeB.pos = { x: 3, z: 4 };
+    const element = new Element(model, {
+      id: "element-hinge-1",
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+      hinges: [true, false],
+    });
+
+    const k = element.stiffnessMatrix!;
+    // Released θ1 row/col is zeroed
+    for (let j = 0; j < 6; j++) {
+      expect(k.at(2, j)).toBeCloseTo(0);
+      expect(k.at(j, 2)).toBeCloseTo(0);
+    }
+    // Axial block unchanged
+    expect(k.at(0, 0)).toBeCloseTo(420000000);
+    // Transverse block: 3EI/L³, 3EI/L², 3EI/L (propped cantilever)
+    expect(k.at(1, 1)).toBeCloseTo((3 * 210e9 * 8.333e-6) / 125);
+    expect(k.at(1, 4)).toBeCloseTo((-3 * 210e9 * 8.333e-6) / 125);
+    expect(k.at(4, 5)).toBeCloseTo((-3 * 210e9 * 8.333e-6) / 25);
+    expect(k.at(5, 5)).toBeCloseTo((3 * 210e9 * 8.333e-6) / 5);
+  });
+
+  it("condenses stiffness matrix with hinge at node 2", () => {
+    nodeA.pos = { x: 0, z: 0 };
+    nodeB.pos = { x: 3, z: 4 };
+    const element = new Element(model, {
+      id: "element-hinge-2",
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+      hinges: [false, true],
+    });
+
+    const k = element.stiffnessMatrix!;
+    for (let j = 0; j < 6; j++) {
+      expect(k.at(5, j)).toBeCloseTo(0);
+      expect(k.at(j, 5)).toBeCloseTo(0);
+    }
+    expect(k.at(1, 1)).toBeCloseTo((3 * 210e9 * 8.333e-6) / 125);
+    expect(k.at(4, 1)).toBeCloseTo((-3 * 210e9 * 8.333e-6) / 125);
+    expect(k.at(1, 2)).toBeCloseTo((3 * 210e9 * 8.333e-6) / 25);
+    expect(k.at(2, 2)).toBeCloseTo((3 * 210e9 * 8.333e-6) / 5);
+  });
+
+  it("reduces to axial-only stiffness with hinges at both ends", () => {
+    nodeA.pos = { x: 0, z: 0 };
+    nodeB.pos = { x: 3, z: 4 };
+    const element = new Element(model, {
+      id: "element-hinge-3",
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+      hinges: [true, true],
+    });
+
+    const k = element.stiffnessMatrix!;
+    expect(k.at(0, 0)).toBeCloseTo(420000000);
+    expect(k.at(0, 3)).toBeCloseTo(-420000000);
+    for (let j = 0; j < 6; j++) {
+      for (let i = 1; i < 6; i++) {
+        if (i === 3 && j === 0) continue;
+        if (i === 0 && j === 3) continue;
+        if (i === 3 && j === 3) continue;
+        expect(Math.abs(k.at(i, j))).toBeLessThan(1e-3);
+      }
+    }
+  });
+
+  it("marks dirty when hinge flags change", () => {
+    const element = new Element(model, {
+      id: "element-hinge-4",
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+    });
+    element.hingeStart = true;
+    expect(element.dirty).toBe(true);
+    expect(element.releasedDofs).toEqual([2]);
+    element.hingeStart = false;
+    expect(element.dirty).toBe(true);
+  });
+
+  it("condenses equivalent nodal forces for hinged element", () => {
+    nodeA.pos = { x: 0, z: 0 };
+    nodeB.pos = { x: 3, z: 4 };
+    const element = new Element(model, {
+      id: "element-hinge-5",
+      nodeIDs: [nodeA.id, nodeB.id],
+      materialID,
+      crossectionID,
+      hinges: [true, false],
+    });
+    element.updateCache();
+    // uniform transverse load qy=1
+    const f = element.condenseLocalForces(
+      new Float64Array([0, 5 / 2, 25 / 12, 0, 5 / 2, -25 / 12])
+    );
+    expect(f[0]).toBeCloseTo(0);
+    expect(f[1]).toBeCloseTo((3 * 5) / 8);
+    expect(f[2]).toBeCloseTo(0);
+    expect(f[4]).toBeCloseTo((5 * 5) / 8);
+    expect(f[5]).toBeCloseTo(-25 / 8);
+  });
+
   it("handles zero-length element (nodes at same position)", () => {
     const nodeD = new Node(model, { coords: { x: 0, z: 0 } });
     const nodeE = new Node(model, { coords: { x: 0, z: 0 } });
