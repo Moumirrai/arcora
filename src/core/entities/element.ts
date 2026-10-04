@@ -3,8 +3,14 @@ import type { Model } from "../model";
 import type { WithOptional } from "../types";
 
 export class ElementsMap extends Map<string, Element> {
+  #structureVersion = 0;
+
   constructor(private model: Model) {
     super();
+  }
+
+  get structureVersion(): number {
+    return this.#structureVersion;
   }
 
   override set(key: string, value: Element): this {
@@ -16,6 +22,7 @@ export class ElementsMap extends Map<string, Element> {
       }
     }
     super.set(key, value);
+    this.#structureVersion++;
     for (const id of value.nodeIDs) {
       const node = this.model.nodes.get(id);
       if (node) node.connectedElementIDs.add(key);
@@ -31,7 +38,9 @@ export class ElementsMap extends Map<string, Element> {
         if (node) node.connectedElementIDs.delete(key);
       }
     }
-    return super.delete(key);
+    const existed = super.delete(key);
+    if (existed) this.#structureVersion++;
+    return existed;
   }
 
   override clear(): void {
@@ -42,6 +51,7 @@ export class ElementsMap extends Map<string, Element> {
       }
     }
     super.clear();
+    this.#structureVersion++;
   }
 }
 

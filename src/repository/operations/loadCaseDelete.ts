@@ -1,46 +1,42 @@
 import type { IOperation } from "../IOperation";
-import type { Model } from "@arcora/core/model";
+import { LoadCase, type LoadCaseData } from "../../core/entities/loadCase";
+import type { Model } from "../../core/model";
 import type { TransactionChanges } from "../changes";
-import { Element, type ElementData } from "../../core/entities/element";
-import { ElementLoad } from "../../core/entities/elementLoad";
 import { RemoveLoadOperation } from "./loadDelete";
 
-export class RemoveElementOperation implements IOperation {
-  #elementData?: ElementData;
+export class RemoveLoadCaseOperation implements IOperation {
+  #loadCaseData?: LoadCaseData;
   #loadOps: RemoveLoadOperation[] = [];
   #skipped = false;
 
   constructor(public readonly id: string) {}
 
   do(model: Model, changes: TransactionChanges): void | Error {
-    if (this.#elementData) {
+    if (this.#loadCaseData) {
       for (const loadOp of this.#loadOps) {
         const err = loadOp.do(model, changes);
         if (err) return err;
       }
-      model.elements.delete(this.id);
-      changes.removed.set(this.id, {
-        kind: "element",
-        id: this.id,
-      });
+      model.loadCases.delete(this.id);
+      changes.removed.set(this.id, { kind: "loadCase", id: this.id });
       return;
     }
 
-    const element = model.elements.get(this.id);
-    if (!element) {
+    const loadCase = model.loadCases.get(this.id);
+    if (!loadCase) {
       if (changes.removed.has(this.id)) {
         this.#skipped = true;
         return;
       }
       return new Error(
-        `RemoveElementOperation: Element "${this.id}" does not exist`
+        `RemoveLoadCaseOperation: Load case "${this.id}" does not exist`
       );
     }
 
-    this.#elementData = element.toData();
+    this.#loadCaseData = loadCase.toData();
 
     for (const [loadId, load] of model.loads) {
-      if (load instanceof ElementLoad && load.elementID === this.id) {
+      if (load.loadCaseID === this.id) {
         const loadOp = new RemoveLoadOperation(loadId);
         const err = loadOp.do(model, changes);
         if (err) return err;
@@ -48,29 +44,23 @@ export class RemoveElementOperation implements IOperation {
       }
     }
 
-    model.elements.delete(this.id);
-    changes.removed.set(this.id, {
-      kind: "element",
-      id: this.id,
-    });
+    model.loadCases.delete(this.id);
+    changes.removed.set(this.id, { kind: "loadCase", id: this.id });
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
-    if (!this.#elementData) {
+    if (!this.#loadCaseData) {
       if (this.#skipped) {
         return;
       }
       return new Error(
-        `RemoveElementOperation: No record of element "${this.id}" to undo`
+        `RemoveLoadCaseOperation: No record of load case "${this.id}" to undo`
       );
     }
 
-    model.elements.set(this.id, new Element(model, this.#elementData));
-    changes.added.set(this.id, {
-      kind: "element",
-      id: this.id,
-    });
+    model.loadCases.set(this.id, new LoadCase(model, this.#loadCaseData));
+    changes.added.set(this.id, { kind: "loadCase", id: this.id });
 
     for (let i = this.#loadOps.length - 1; i >= 0; i--) {
       const err = this.#loadOps[i]!.undo(model, changes);

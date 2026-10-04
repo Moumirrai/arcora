@@ -56,6 +56,7 @@ export class ModelRepository {
 
     if (!success) {
       console.error("transaction do failed");
+      // TODO: propagate error to caller instead of silently logging
       return;
     }
 
