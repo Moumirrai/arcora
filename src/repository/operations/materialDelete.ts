@@ -1,7 +1,12 @@
 import type { IOperation } from "../IOperation";
 import { Material, type MaterialData } from "../../core/entities/material";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  changeKey,
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 export class RemoveMaterialOperation implements IOperation {
   #materialData?: MaterialData;
@@ -12,13 +17,13 @@ export class RemoveMaterialOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#materialData) {
       model.materials.delete(this.id);
-      changes.removed.set(this.id, { kind: "material", id: this.id });
+      recordRemoved(changes, "material", this.id);
       return;
     }
 
     const material = model.materials.get(this.id);
     if (!material) {
-      if (changes.removed.has(this.id)) {
+      if (changes.removed.has(changeKey("material", this.id))) {
         this.#skipped = true;
         return;
       }
@@ -44,7 +49,7 @@ export class RemoveMaterialOperation implements IOperation {
     this.#materialData = material.toData();
 
     model.materials.delete(this.id);
-    changes.removed.set(this.id, { kind: "material", id: this.id });
+    recordRemoved(changes, "material", this.id);
     return;
   }
 
@@ -59,7 +64,7 @@ export class RemoveMaterialOperation implements IOperation {
     }
 
     model.materials.set(this.id, new Material(model, this.#materialData));
-    changes.added.set(this.id, { kind: "material", id: this.id });
+    recordAdded(changes, "material", this.id);
 
     return;
   }

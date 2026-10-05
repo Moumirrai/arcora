@@ -1,6 +1,6 @@
 import type { IOperation } from "../IOperation";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import { recordChanged, type TransactionChanges } from "../changes";
 import { loadToData, loadTypeOf, type LoadData } from "./loadData";
 import type { NodalLoad } from "../../core/entities/nodalLoad";
 import type { UniformLoad } from "../../core/entities/uniformLoad";
@@ -71,7 +71,7 @@ export class UpdateLoadOperation implements IOperation {
       }
     }
 
-    changes.changed.set(this.id, { kind: "load", id: this.id });
+    recordChanged(changes, "load", this.id);
     return;
   }
 

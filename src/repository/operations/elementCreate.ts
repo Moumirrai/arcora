@@ -1,7 +1,11 @@
 import type { IOperation } from "../IOperation";
 import { Element } from "../../core/entities/element";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 type AddElementOptions = {
   nodeIDs: readonly [string, string];
@@ -22,7 +26,7 @@ export class AddElementOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.createdElement) {
       model.elements.set(this.id, this.createdElement);
-      changes.added.set(this.id, { kind: "element", id: this.id });
+      recordAdded(changes, "element", this.id);
       return;
     }
 
@@ -56,14 +60,14 @@ export class AddElementOperation implements IOperation {
     });
     model.elements.set(this.id, newElement);
     this.createdElement = newElement;
-    changes.added.set(this.id, { kind: "element", id: this.id });
+    recordAdded(changes, "element", this.id);
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (this.createdElement && model.elements.has(this.id)) {
       model.elements.delete(this.id);
-      changes.removed.set(this.id, { kind: "element", id: this.id });
+      recordRemoved(changes, "element", this.id);
       return;
     }
     return new Error(

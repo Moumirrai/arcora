@@ -1,7 +1,7 @@
 import type { IOperation } from "../IOperation";
 import type { NodeData } from "../../core/entities/node";
 import type { Model } from "@arcora/core/model";
-import type { TransactionChanges } from "../changes";
+import { recordChanged, type TransactionChanges } from "../changes";
 
 export class UpdateNodeOperation implements IOperation {
   #oldData?: NodeData;
@@ -27,9 +27,9 @@ export class UpdateNodeOperation implements IOperation {
     node.prescribedDisplacement = data.prescribedDisplacement;
     node.name = data.name;
 
-    changes.changed.set(this.id, { kind: "node", id: this.id });
+    recordChanged(changes, "node", this.id);
     for (const elementId of node.connectedElementIDs) {
-      changes.changed.set(elementId, { kind: "element", id: elementId });
+      recordChanged(changes, "element", elementId);
     }
   }
 

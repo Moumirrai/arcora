@@ -1,7 +1,7 @@
 import type { IOperation } from "../IOperation";
 import type { CrossectionData } from "../../core/entities/crossection";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import { recordChanged, type TransactionChanges } from "../changes";
 
 export class UpdateCrossectionOperation implements IOperation {
   #oldData?: CrossectionData;
@@ -29,10 +29,10 @@ export class UpdateCrossectionOperation implements IOperation {
     crossection.Iy = data.Iy;
     crossection.Iz = data.Iz;
 
-    changes.changed.set(this.id, { kind: "crossSection", id: this.id });
+    recordChanged(changes, "crossSection", this.id);
     for (const [elementId, element] of model.elements) {
       if (element.crossectionID === this.id) {
-        changes.changed.set(elementId, { kind: "element", id: elementId });
+        recordChanged(changes, "element", elementId);
       }
     }
     return;

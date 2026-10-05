@@ -1,7 +1,7 @@
 import type { IOperation } from "../IOperation";
 import type { MaterialData } from "../../core/entities/material";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import { recordChanged, type TransactionChanges } from "../changes";
 
 export class UpdateMaterialOperation implements IOperation {
   #oldData?: MaterialData;
@@ -30,10 +30,10 @@ export class UpdateMaterialOperation implements IOperation {
     material.alpha = data.alpha;
     material.density = data.density;
 
-    changes.changed.set(this.id, { kind: "material", id: this.id });
+    recordChanged(changes, "material", this.id);
     for (const [elementId, element] of model.elements) {
       if (element.materialID === this.id) {
-        changes.changed.set(elementId, { kind: "element", id: elementId });
+        recordChanged(changes, "element", elementId);
       }
     }
     return;

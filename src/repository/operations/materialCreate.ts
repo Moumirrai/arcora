@@ -1,7 +1,11 @@
 import type { IOperation } from "../IOperation";
 import { Material } from "../../core/entities/material";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 type AddMaterialOptions = {
   E: number;
@@ -22,7 +26,7 @@ export class AddMaterialOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdMaterial) {
       model.materials.set(this.id, this.#createdMaterial);
-      changes.added.set(this.id, { kind: "material", id: this.id });
+      recordAdded(changes, "material", this.id);
       return;
     }
 
@@ -36,14 +40,14 @@ export class AddMaterialOperation implements IOperation {
 
     model.materials.set(this.id, newMaterial);
     this.#createdMaterial = newMaterial;
-    changes.added.set(this.id, { kind: "material", id: this.id });
+    recordAdded(changes, "material", this.id);
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdMaterial && model.materials.has(this.id)) {
       model.materials.delete(this.id);
-      changes.removed.set(this.id, { kind: "material", id: this.id });
+      recordRemoved(changes, "material", this.id);
       return;
     }
     return new Error(

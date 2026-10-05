@@ -1,7 +1,7 @@
 import type { IOperation } from "../IOperation";
 import type { LoadCaseData } from "../../core/entities/loadCase";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import { recordChanged, type TransactionChanges } from "../changes";
 
 export class UpdateLoadCaseOperation implements IOperation {
   #oldData?: LoadCaseData;
@@ -29,10 +29,10 @@ export class UpdateLoadCaseOperation implements IOperation {
     loadCase.type = data.type;
     loadCase.selfWeight = data.selfWeight;
 
-    changes.changed.set(this.id, { kind: "loadCase", id: this.id });
+    recordChanged(changes, "loadCase", this.id);
     for (const [loadId, load] of model.loads) {
       if (load.loadCaseID === this.id) {
-        changes.changed.set(loadId, { kind: "load", id: loadId });
+        recordChanged(changes, "load", loadId);
       }
     }
     return;

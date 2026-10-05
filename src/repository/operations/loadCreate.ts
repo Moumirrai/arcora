@@ -1,7 +1,11 @@
 import type { IOperation } from "../IOperation";
 import type { Load } from "../../core/entities/load";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 import { createLoad, type LoadDataPartial } from "./loadData";
 
 export class AddLoadOperation implements IOperation {
@@ -15,7 +19,7 @@ export class AddLoadOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdLoad) {
       model.loads.set(this.id, this.#createdLoad);
-      changes.added.set(this.id, { kind: "load", id: this.id });
+      recordAdded(changes, "load", this.id);
       return;
     }
 
@@ -41,14 +45,14 @@ export class AddLoadOperation implements IOperation {
     const newLoad = createLoad(model, { ...opts, id: this.id });
     model.loads.set(this.id, newLoad);
     this.#createdLoad = newLoad;
-    changes.added.set(this.id, { kind: "load", id: this.id });
+    recordAdded(changes, "load", this.id);
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdLoad && model.loads.has(this.id)) {
       model.loads.delete(this.id);
-      changes.removed.set(this.id, { kind: "load", id: this.id });
+      recordRemoved(changes, "load", this.id);
       return;
     }
     return new Error(

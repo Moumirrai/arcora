@@ -1,7 +1,11 @@
 import type { IOperation } from "../IOperation";
 import { Node } from "../../core/entities/node";
 import type { Model } from "@arcora/core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 type AddNodeOptions = {
   x: number;
@@ -20,7 +24,7 @@ export class AddNodeOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdNode) {
       model.nodes.set(this.id, this.#createdNode);
-      changes.added.set(this.id, { kind: "node", id: this.id });
+      recordAdded(changes, "node", this.id);
       return;
     }
     const assignedName =
@@ -34,14 +38,14 @@ export class AddNodeOperation implements IOperation {
     model.nodes.set(this.id, newNode);
 
     this.#createdNode = newNode;
-    changes.added.set(this.id, { kind: "node", id: this.id });
+    recordAdded(changes, "node", this.id);
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdNode && model.nodes.has(this.id)) {
       model.nodes.delete(this.id);
-      changes.removed.set(this.id, { kind: "node", id: this.id });
+      recordRemoved(changes, "node", this.id);
       return;
     }
     return new Error(

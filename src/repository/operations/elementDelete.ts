@@ -1,6 +1,11 @@
 import type { IOperation } from "../IOperation";
 import type { Model } from "@arcora/core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  changeKey,
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 import { Element, type ElementData } from "../../core/entities/element";
 import { ElementLoad } from "../../core/entities/elementLoad";
 import { RemoveLoadOperation } from "./loadDelete";
@@ -19,16 +24,13 @@ export class RemoveElementOperation implements IOperation {
         if (err) return err;
       }
       model.elements.delete(this.id);
-      changes.removed.set(this.id, {
-        kind: "element",
-        id: this.id,
-      });
+      recordRemoved(changes, "element", this.id);
       return;
     }
 
     const element = model.elements.get(this.id);
     if (!element) {
-      if (changes.removed.has(this.id)) {
+      if (changes.removed.has(changeKey("element", this.id))) {
         this.#skipped = true;
         return;
       }
@@ -49,10 +51,7 @@ export class RemoveElementOperation implements IOperation {
     }
 
     model.elements.delete(this.id);
-    changes.removed.set(this.id, {
-      kind: "element",
-      id: this.id,
-    });
+    recordRemoved(changes, "element", this.id);
     return;
   }
 
@@ -67,10 +66,7 @@ export class RemoveElementOperation implements IOperation {
     }
 
     model.elements.set(this.id, new Element(model, this.#elementData));
-    changes.added.set(this.id, {
-      kind: "element",
-      id: this.id,
-    });
+    recordAdded(changes, "element", this.id);
 
     for (let i = this.#loadOps.length - 1; i >= 0; i--) {
       const err = this.#loadOps[i]!.undo(model, changes);

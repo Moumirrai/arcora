@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Model } from "@arcora/core/model";
 import { ModelRepository } from "@arcora/repository/modelRepository";
 import { Transaction } from "@arcora/repository/Transaction";
+import { changeKey } from "@arcora/repository/changes";
 import { AddNodeOperation } from "@arcora/repository/operations/nodeCreate";
 import { AddElementOperation } from "@arcora/repository/operations/elementCreate";
 import { Material } from "@arcora/core/entities/material";
@@ -106,7 +107,7 @@ describe("AddMaterialOperation", () => {
     repo.commit(txn);
 
     expect(emitted).toHaveLength(1);
-    expect(emitted[0]!.added.get(op.id)).toEqual({
+    expect(emitted[0]!.added.get(changeKey("material", op.id))).toEqual({
       kind: "material",
       id: op.id,
     });
@@ -287,7 +288,7 @@ describe("AddCrossectionOperation", () => {
     txn.addCommand(op);
     repo.commit(txn);
 
-    expect(emitted[0]!.added.get(op.id)).toEqual({
+    expect(emitted[0]!.added.get(changeKey("crossSection", op.id))).toEqual({
       kind: "crossSection",
       id: op.id,
     });

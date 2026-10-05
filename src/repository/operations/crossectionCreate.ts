@@ -1,7 +1,11 @@
 import type { IOperation } from "../IOperation";
 import { Crossection } from "../../core/entities/crossection";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 type AddCrossectionOptions = {
   area: number;
@@ -21,7 +25,7 @@ export class AddCrossectionOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdCrossection) {
       model.crossections.set(this.id, this.#createdCrossection);
-      changes.added.set(this.id, { kind: "crossSection", id: this.id });
+      recordAdded(changes, "crossSection", this.id);
       return;
     }
 
@@ -34,14 +38,14 @@ export class AddCrossectionOperation implements IOperation {
 
     model.crossections.set(this.id, newCrossection);
     this.#createdCrossection = newCrossection;
-    changes.added.set(this.id, { kind: "crossSection", id: this.id });
+    recordAdded(changes, "crossSection", this.id);
     return;
   }
 
   undo(model: Model, changes: TransactionChanges): void | Error {
     if (this.#createdCrossection && model.crossections.has(this.id)) {
       model.crossections.delete(this.id);
-      changes.removed.set(this.id, { kind: "crossSection", id: this.id });
+      recordRemoved(changes, "crossSection", this.id);
       return;
     }
     return new Error(

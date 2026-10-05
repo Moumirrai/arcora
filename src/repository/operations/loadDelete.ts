@@ -1,6 +1,11 @@
 import type { IOperation } from "../IOperation";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  changeKey,
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 import { createLoad, loadToData, type LoadData } from "./loadData";
 
 export class RemoveLoadOperation implements IOperation {
@@ -12,13 +17,13 @@ export class RemoveLoadOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#loadData) {
       model.loads.delete(this.id);
-      changes.removed.set(this.id, { kind: "load", id: this.id });
+      recordRemoved(changes, "load", this.id);
       return;
     }
 
     const load = model.loads.get(this.id);
     if (!load) {
-      if (changes.removed.has(this.id)) {
+      if (changes.removed.has(changeKey("load", this.id))) {
         this.#skipped = true;
         return;
       }
@@ -27,7 +32,7 @@ export class RemoveLoadOperation implements IOperation {
 
     this.#loadData = loadToData(load);
     model.loads.delete(this.id);
-    changes.removed.set(this.id, { kind: "load", id: this.id });
+    recordRemoved(changes, "load", this.id);
     return;
   }
 
@@ -42,7 +47,7 @@ export class RemoveLoadOperation implements IOperation {
     }
 
     model.loads.set(this.id, createLoad(model, this.#loadData));
-    changes.added.set(this.id, { kind: "load", id: this.id });
+    recordAdded(changes, "load", this.id);
     return;
   }
 }

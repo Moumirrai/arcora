@@ -1,7 +1,12 @@
 import type { IOperation } from "../IOperation";
 import { LoadCase, type LoadCaseData } from "../../core/entities/loadCase";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  changeKey,
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 import { RemoveLoadOperation } from "./loadDelete";
 
 export class RemoveLoadCaseOperation implements IOperation {
@@ -18,13 +23,13 @@ export class RemoveLoadCaseOperation implements IOperation {
         if (err) return err;
       }
       model.loadCases.delete(this.id);
-      changes.removed.set(this.id, { kind: "loadCase", id: this.id });
+      recordRemoved(changes, "loadCase", this.id);
       return;
     }
 
     const loadCase = model.loadCases.get(this.id);
     if (!loadCase) {
-      if (changes.removed.has(this.id)) {
+      if (changes.removed.has(changeKey("loadCase", this.id))) {
         this.#skipped = true;
         return;
       }
@@ -45,7 +50,7 @@ export class RemoveLoadCaseOperation implements IOperation {
     }
 
     model.loadCases.delete(this.id);
-    changes.removed.set(this.id, { kind: "loadCase", id: this.id });
+    recordRemoved(changes, "loadCase", this.id);
     return;
   }
 
@@ -60,7 +65,7 @@ export class RemoveLoadCaseOperation implements IOperation {
     }
 
     model.loadCases.set(this.id, new LoadCase(model, this.#loadCaseData));
-    changes.added.set(this.id, { kind: "loadCase", id: this.id });
+    recordAdded(changes, "loadCase", this.id);
 
     for (let i = this.#loadOps.length - 1; i >= 0; i--) {
       const err = this.#loadOps[i]!.undo(model, changes);

@@ -4,7 +4,12 @@ import {
   type CrossectionData,
 } from "../../core/entities/crossection";
 import type { Model } from "../../core/model";
-import type { TransactionChanges } from "../changes";
+import {
+  changeKey,
+  recordAdded,
+  recordRemoved,
+  type TransactionChanges,
+} from "../changes";
 
 export class RemoveCrossectionOperation implements IOperation {
   #crossectionData?: CrossectionData;
@@ -15,13 +20,13 @@ export class RemoveCrossectionOperation implements IOperation {
   do(model: Model, changes: TransactionChanges): void | Error {
     if (this.#crossectionData) {
       model.crossections.delete(this.id);
-      changes.removed.set(this.id, { kind: "crossSection", id: this.id });
+      recordRemoved(changes, "crossSection", this.id);
       return;
     }
 
     const crossection = model.crossections.get(this.id);
     if (!crossection) {
-      if (changes.removed.has(this.id)) {
+      if (changes.removed.has(changeKey("crossSection", this.id))) {
         this.#skipped = true;
         return;
       }
@@ -47,7 +52,7 @@ export class RemoveCrossectionOperation implements IOperation {
     this.#crossectionData = crossection.toData();
 
     model.crossections.delete(this.id);
-    changes.removed.set(this.id, { kind: "crossSection", id: this.id });
+    recordRemoved(changes, "crossSection", this.id);
     return;
   }
 
@@ -65,7 +70,7 @@ export class RemoveCrossectionOperation implements IOperation {
       this.id,
       new Crossection(model, this.#crossectionData)
     );
-    changes.added.set(this.id, { kind: "crossSection", id: this.id });
+    recordAdded(changes, "crossSection", this.id);
 
     return;
   }
