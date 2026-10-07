@@ -49,6 +49,32 @@ function vycistiMultiPolygon(
     return vysledek;
 }
 
+// Sanitizace ringu před vstupem do polygon-clipping:
+//   - snap na mřížku 1e-4 mm (odstraní numerický šum),
+//   - odstranění těsných duplikátů za sebou,
+//   - odstranění uzavíracího bodu, pokud je stejný jako první.
+// Bez tohoto občas polygon-clipping uvízne ve sweep-line smyčce,
+// když se hrana dostane do téměř přesného dotyku s jinou hranou.
+function sanitizujRing(ring: ReadonlyArray<readonly [number, number]>): [number, number][] {
+    const krok = 1e-4; // 0.1 mikrometru - hluboko pod praktickou přesností
+    const out: [number, number][] = [];
+    for (let i = 0; i < ring.length; i++) {
+        const x = Math.round(ring[i]![0]! / krok) * krok;
+        const y = Math.round(ring[i]![1]! / krok) * krok;
+        if (out.length > 0) {
+            const last = out[out.length - 1]!;
+            if (Math.abs(last[0] - x) < krok / 2 && Math.abs(last[1] - y) < krok / 2) continue;
+        }
+        out.push([x, y]);
+    }
+    if (out.length >= 2) {
+        const first = out[0]!;
+        const last = out[out.length - 1]!;
+        if (first[0] === last[0] && first[1] === last[1]) out.pop();
+    }
+    return out;
+}
+
 // Sloučí vrcholy se stejnými souřadnicemi v rámci jednoho ringu.
 // Používá se po boolean operacích - polygon-clipping občas vrací ringy
 // s duplikovanými body (dva vrcholy na sobě). Tolerance je 1e-6 mm,
@@ -438,6 +464,113 @@ export class SpravceTeles {
     pruseciky: Bod[] = [];
     zvolene_E_ref?: number;
 
+    // Pořadí materiálů podle priority: index 0 = nejsilnější.
+    // Silnější materiály se "vykousávají" do slabších.
+    public prioritaMaterialu: Array<{ E: number; ro: number }> = [];
+
+    // Efektivní (vypočítané) polygony – pro render a výpočet charakteristik.
+    // Berou v úvahu prioritu materiálů a odečítají silnější od slabších.
+    // Pro uživatelskou editaci se používají SOUROVÉ `this.polygony` výše.
+    public efektivniPolygony: Polygon[] = [];
+
+    // Nastaví pořadí priority materiálů a přepočítá efektivní polygony.
+    public nastavPriorituMaterialu(poradi: Array<{ E: number; ro: number }>): void {
+        this.prioritaMaterialu = poradi;
+        this.prepocitejEfektivni();
+    }
+
+    // Přepočítá efektivní polygony:
+    //   1) Seřadí materiály podle priority (materiály mimo pořadí jdou na konec).
+    //   2) Pro každý materiál spočítá jeho MultiPolygon (union/difference).
+    //   3) Od každého materiálu odečte unii všech silnějších materiálů.
+    //   4) Rozloží výsledek na polygony (kladné = outer, záporné = díry).
+    public prepocitejEfektivni(): void {
+        // 1) Sestavení seznamu materiálů v pořadí priority
+        const serazene: Array<{ E: number; ro: number }> = [];
+        const videne = new Set<string>();
+        for (const m of this.prioritaMaterialu) {
+            const key = `${m.E}|${m.ro}`;
+            if (videne.has(key)) continue;
+            videne.add(key);
+            serazene.push(m);
+        }
+        for (const p of this.polygony) {
+            const key = `${p.E}|${p.ro}`;
+            if (videne.has(key)) continue;
+            videne.add(key);
+            serazene.push({ E: p.E, ro: p.ro });
+        }
+
+        // 2) Postupný výpočet - pro každý materiál
+        let silnejsi: polygonClipping.MultiPolygon = [];
+        const vysledek: Polygon[] = [];
+
+        for (const m of serazene) {
+            try {
+                // Rozdělit polygony materiálu na kladné a záporné (se sanitizací ringů)
+                const kladneRings: polygonClipping.Ring[] = [];
+                const zaporneRings: polygonClipping.Ring[] = [];
+                for (const p of this.polygony) {
+                    if (p.E !== m.E || p.ro !== m.ro) continue;
+                    const r = sanitizujRing(p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]));
+                    if (r.length < 3) continue;
+                    (p.kladne ? kladneRings : zaporneRings).push(r);
+                }
+
+                // Batch union kladných: každý Ring obalíme do [ring], aby to byl Geom (Polygon).
+                let mp: polygonClipping.MultiPolygon = [];
+                if (kladneRings.length > 0) {
+                    const kladneGeom: polygonClipping.Geom[] = kladneRings.map(r => [r]);
+                    mp = polygonClipping.union(kladneGeom[0]!, ...kladneGeom.slice(1));
+                }
+
+                // Batch difference záporných (stejné obalení)
+                if (zaporneRings.length > 0 && mp.length > 0) {
+                    const zaporneGeom: polygonClipping.Geom[] = zaporneRings.map(r => [r]);
+                    mp = polygonClipping.difference(mp, zaporneGeom[0]!, ...zaporneGeom.slice(1));
+                }
+
+                // Odečíst silnější materiály
+                if (silnejsi.length > 0 && mp.length > 0) {
+                    mp = polygonClipping.difference(mp, ...silnejsi);
+                }
+                mp = vycistiMultiPolygon(mp);
+
+                // Akumulovat do silnějších
+                if (mp.length > 0) {
+                    silnejsi = polygonClipping.union(silnejsi, ...mp);
+                    silnejsi = vycistiMultiPolygon(silnejsi);
+                }
+
+                // Rozložit na polygony (outer + díry)
+                for (const part of mp) {
+                    const outer = part[0]!;
+                    vysledek.push(new Polygon(
+                        outer.map(p => p[0]), outer.map(p => p[1]),
+                        true, m.ro, m.E
+                    ));
+                    for (let h = 1; h < part.length; h++) {
+                        const hole = part[h]!;
+                        vysledek.push(new Polygon(
+                            hole.map(p => p[0]), hole.map(p => p[1]),
+                            false, m.ro, m.E
+                        ));
+                    }
+                }
+            } catch (e) {
+                // Jeden materiál selhal → přeskočit ho, ostatní pokračují.
+                // Efektivní stav pro tento materiál zůstane z předchozího framu.
+                console.warn(`prepocitejEfektivni: materiál (E=${m.E}, ρ=${m.ro}) selhal, přeskakuji`, e);
+                // Zachováme předchozí efektivní polygony tohoto materiálu
+                for (const p of this.efektivniPolygony) {
+                    if (p.E === m.E && p.ro === m.ro) vysledek.push(p);
+                }
+            }
+        }
+
+        this.efektivniPolygony = vysledek;
+    }
+
     private editSession: {
         idTvaru: string;
         idVrcholu: string;
@@ -468,12 +601,16 @@ export class SpravceTeles {
             p.x_val.map((x, k) => [x, p.y_val[k]!] as [number, number])
         );
 
-        // 2) Průsečíky hran mezi kladnými polygony
+        // 2) Průsečíky hran mezi kladnými polygony STEJNÉHO MATERIÁLU
         for (let i = 0; i < kladne.length; i++) {
             const ringA = rings[i]!;
+            const pA = kladne[i]!;
             const edgesA = ringA.length - 1;
             for (let j = i + 1; j < kladne.length; j++) {
                 const ringB = rings[j]!;
+                const pB = kladne[j]!;
+                // Mezi různými materiály není kolize - vyřeší se to prioritou
+                if (pA.E !== pB.E || pA.ro !== pB.ro) continue;
                 const edgesB = ringB.length - 1;
                 if (this.ringsSeKrizi(ringA, edgesA, ringB, edgesB)) return true;
 
@@ -481,6 +618,8 @@ export class SpravceTeles {
                 const aInB = this.ringUvnitrRingu(ringA, ringB);
                 const bInA = this.ringUvnitrRingu(ringB, ringA);
 
+                // Mezi různými materiály není kolize
+                if (pA.E !== pB.E || pA.ro !== pB.ro) continue;
                 if (aInB || bInA) {
                     const innerRing = aInB ? ringA : ringB;
                     // Legitimní ostrůvek = vnitřní polygon CELÝ uvnitř některého negativu
@@ -509,9 +648,13 @@ export class SpravceTeles {
         //    hrana se s hranou díry může setkat, aniž by to byla kolize.
         for (let i = 0; i < kladne.length; i++) {
             const ringP = rings[i]!;
+            const pP = kladne[i]!;
             const edgesP = ringP.length - 1;
             for (let j = 0; j < zaporny.length; j++) {
                 const ringN = negRings[j]!;
+                const pN = zaporny[j]!;
+                // Mezi různými materiály není kolize
+                if (pP.E !== pN.E || pP.ro !== pN.ro) continue;
                 const edgesN = ringN.length - 1;
                 // N musí být uvnitř P, aby šlo o díru patřící P
                 if (!this.ringUvnitrRingu(ringN, ringP)) continue;
@@ -745,6 +888,7 @@ export class SpravceTeles {
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
 
         if (sameMat.length >= 2) {
+            try {
             const orderedSameMat = this.computeApplicationOrder(sameMat);
             const subtreeIds = this.computeSubtreeIdsFromSnapshot();
             const editedId = this.editSession!.idTvaru;
@@ -787,6 +931,9 @@ export class SpravceTeles {
             }
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
+            } catch (e) {
+                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+            }
         }
 
         const blizky = this.najdiVrcholBlizko(x, y, 1e-3);
@@ -939,15 +1086,14 @@ export class SpravceTeles {
         return inside;
     }
 
-    // Vrátí ID polygonu, jehož ring obsahuje bod (x, y), s největší hloubkou
-    // vnoření. Ostrůvek (uvnitř otvoru, uvnitř rodiče) vyhraje nad otvorem
-    // i nad rodičem, a to i když mají různé materiály.
-    //
-    // Hloubka se počítá jako "kolik dalších kandidátů obsahuje tento polygon
-    // jako tvar" (ringUvnitrRingu), NE jen jako "kolik ringů obsahuje bod" -
-    // to by bylo symetrické a nerozlišilo by ostrůvek od jeho rodičů.
+    // Vrátí ID SOUROVÉHO polygonu, jehož ring obsahuje bod (x, y).
+    // Výběr se řídí podle:
+    //   1) geometrické hloubky vnoření (kolik dalších kandidátů ho obsahuje
+    //      jako tvar) — ostrůvek (2) > otvor (1) > rodič (0),
+    //   2) priority materiálu (menší index v prioritaMaterialu = silnější),
+    //   3) při shodě preferuje kladný polygon.
     public najdiPolygonPodBodem(x: number, y: number): string | null {
-        // 1) Rychlý filtr: kandidáti, jejichž ring obsahuje bod
+        // 1) Kandidáti = polygony, jejichž ring obsahuje bod
         const kandidati: Polygon[] = [];
         const kandidatiRings: [number, number][][] = [];
         for (const p of this.polygony) {
@@ -960,11 +1106,14 @@ export class SpravceTeles {
         if (kandidati.length === 0) return null;
         if (kandidati.length === 1) return kandidati[0]!.id;
 
-        // 2) Pro každého kandidáta spočítat hloubku vnoření (kolik dalších
-        //    kandidátů ho obsahuje jako celek) a vybrat nejhlubšího.
-        let bestIdx = 0;
-        let bestDepth = -1;
-        for (let i = 0; i < kandidati.length; i++) {
+        const prioritaIndex = (E: number, ro: number): number => {
+            const i = this.prioritaMaterialu.findIndex(m => m.E === E && m.ro === ro);
+            return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+        };
+
+        // 2) Pro každého kandidáta spočítat geometrickou hloubku (kolik dalších
+        //    kandidátů ho obsahuje jako celek) a prioritu jeho materiálu.
+        const hodnoceni = kandidati.map((p, i) => {
             const pRing = kandidatiRings[i]!;
             let depth = 0;
             for (let j = 0; j < kandidati.length; j++) {
@@ -972,18 +1121,21 @@ export class SpravceTeles {
                 const qRing = kandidatiRings[j]!;
                 if (this.ringUvnitrRingu(pRing, qRing)) depth++;
             }
-            const p = kandidati[i]!;
-            const best = kandidati[bestIdx]!;
-            if (
-                depth > bestDepth ||
-                (depth === bestDepth && p.kladne && !best.kladne)
-            ) {
-                bestDepth = depth;
-                bestIdx = i;
-            }
-        }
-        return kandidati[bestIdx]!.id;
+            return { p, depth, prio: prioritaIndex(p.E, p.ro) };
+        });
+
+        // 3) Seřadit: větší hloubka první, při shodě silnější materiál (menší prio),
+        //    při shodě kladný polygon.
+        hodnoceni.sort((a, b) => {
+            if (a.depth !== b.depth) return b.depth - a.depth;
+            if (a.prio !== b.prio) return a.prio - b.prio;
+            if (a.p.kladne !== b.p.kladne) return a.p.kladne ? -1 : 1;
+            return 0;
+        });
+
+        return hodnoceni[0]!.p.id;
     }
+
     // --- NOVÁ METODA PRO MODELOVÁNÍ TVARŮ (BOOLEAN OPERACE) ---
     public zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean): void {
         const novyKruh = x_coords.map((x, i) => [x, y_coords[i]!] as [number, number]);
@@ -1152,8 +1304,8 @@ export class SpravceTeles {
     }
 
     spocitejCelkove(): CelkoveCharakteristiky {
-        // Vyfiltrujeme pouze polygony, které mají úspěšně spočítané výsledky
-        const validniPolygony = this.polygony.filter(p => p.vysledky !== undefined);
+        // Používáme efektivní polygony (surové polygony odečtené přes priority materiálů)
+        const validniPolygony = this.efektivniPolygony.filter(p => p.vysledky !== undefined);
 
         if (validniPolygony.length === 0) {
             return {
@@ -1613,6 +1765,7 @@ export class SpravceTeles {
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
 
         if (sameMat.length >= 2) {
+            try {
             const orderedSameMat = this.computeApplicationOrder(sameMat);
             const subtreeIds = this.computeSubtreeIdsFromSnapshot();
             const editedId = this.editSession!.idTvaru;
@@ -1651,6 +1804,9 @@ export class SpravceTeles {
             }
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
+            } catch (e) {
+                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+            }
         }
 
         // 7) Tracking: najdi, kde skončily oba pohybované vrcholy, a vrať
@@ -1735,6 +1891,7 @@ export class SpravceTeles {
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
 
         if (sameMat.length >= 2) {
+            try {
             const orderedSameMat = this.computeApplicationOrder(sameMat);
             const subtreeIds = this.computeSubtreeIdsFromSnapshot();
             const editedId = this.editSession!.idTvaru;
@@ -1773,6 +1930,9 @@ export class SpravceTeles {
             }
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
+            } catch (e) {
+                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+            }
         }
 
         // Tracking: najdi nový polygon podle pozice referenčního vrcholu
