@@ -501,6 +501,15 @@ export class SpravceTeles {
             serazene.push({ E: p.E, ro: p.ro });
         }
 
+        // Předpočítat polygony podle materiálu (klíč = "E|ro"), abychom
+        // nemuseli v každé iteraci procházet celé this.polygony.
+        const podleMaterialu = new Map<string, Polygon[]>();
+        for (const p of this.polygony) {
+            const key = `${p.E}|${p.ro}`;
+            if (!podleMaterialu.has(key)) podleMaterialu.set(key, []);
+            podleMaterialu.get(key)!.push(p);
+        }
+
         // 2) Postupný výpočet - pro každý materiál
         let silnejsi: polygonClipping.MultiPolygon = [];
         const vysledek: Polygon[] = [];
@@ -513,8 +522,8 @@ export class SpravceTeles {
                 // Batch varianta (všechny kladné najednou, pak všechny záporné)
                 // by ostrůvek sežrala dírou.
                 let mp: polygonClipping.MultiPolygon = [];
-                for (const p of this.polygony) {
-                    if (p.E !== m.E || p.ro !== m.ro) continue;
+                const polyMat = podleMaterialu.get(`${m.E}|${m.ro}`) ?? [];
+                for (const p of polyMat) {
                     const r = sanitizujRing(p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]));
                     if (r.length < 3) continue;
                     const ringGeom: polygonClipping.Geom = [r];
@@ -555,7 +564,7 @@ export class SpravceTeles {
             } catch (e) {
                 // Jeden materiál selhal → přeskočit ho, ostatní pokračují.
                 // Efektivní stav pro tento materiál zůstane z předchozího framu.
-                console.warn(`prepocitejEfektivni: materiál (E=${m.E}, ρ=${m.ro}) selhal, přeskakuji`, e);
+                console.debug(`prepocitejEfektivni: materiál (E=${m.E}, ρ=${m.ro}) selhal, přeskakuji`, e);
                 // Zachováme předchozí efektivní polygony tohoto materiálu
                 for (const p of this.efektivniPolygony) {
                     if (p.E === m.E && p.ro === m.ro) vysledek.push(p);
@@ -590,11 +599,14 @@ export class SpravceTeles {
                 if (skupina.has(p.id)) continue;
 
                 let kontakt = false;
+                const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
                 for (const id of skupina) {
                     const clen = this.polygony.find(x => x.id === id);
                     if (!clen) continue;
+                    // Rychlý BBox pre-check: pokud se bounding boxy nepřekrývají,
+                    // intersection by určitě vrátil prázdno, takže ho přeskočíme.
+                    if (!this.bboxPrekryv(clen.x_val, clen.y_val, p.x_val, p.y_val)) continue;
                     const r1 = clen.x_val.map((x, i) => [x, clen.y_val[i]!] as [number, number]);
-                    const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
                     try {
                         const inter = polygonClipping.intersection([r1], [r2]);
                         if (inter.length > 0) { kontakt = true; break; }
@@ -763,19 +775,28 @@ export class SpravceTeles {
         return true;
     }
 
-    // Vrací true, pokud polygon p (musí být kladný) obsahuje nějaký záporný
-    // polygon ze stejného materiálu. Tedy je "rodičem děr" a musí být při
-    // merge aplikován PŘED nimi. Pro kladný polygon, který žádnou díru
-    // neobsahuje (je to samostatné "přidání" materiálu), vrací false.
-    private jeRodicemDer(p: Polygon, allPolys: Polygon[]): boolean {
-        if (!p.kladne) return false;
-        const pRing = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
-        for (const q of allPolys) {
-            if (q.kladne || q === p) continue;
-            const qRing = q.x_val.map((x, i) => [x, q.y_val[i]!] as [number, number]);
-            if (this.ringUvnitrRingu(qRing, pRing)) return true;
+    // Rychlý test, zda se bounding boxy dvou polygonů překrývají.
+    // Levná varianta pro odfiltrování zjevně nesouvisejících párů
+    // před drahým voláním polygon-clipping.intersection.
+    private bboxPrekryv(
+        ax: number[], ay: number[],
+        bx: number[], by: number[]
+    ): boolean {
+        let aMinX = Infinity, aMaxX = -Infinity, aMinY = Infinity, aMaxY = -Infinity;
+        for (let i = 0; i < ax.length; i++) {
+            if (ax[i]! < aMinX) aMinX = ax[i]!;
+            if (ax[i]! > aMaxX) aMaxX = ax[i]!;
+            if (ay[i]! < aMinY) aMinY = ay[i]!;
+            if (ay[i]! > aMaxY) aMaxY = ay[i]!;
         }
-        return false;
+        let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+        for (let i = 0; i < bx.length; i++) {
+            if (bx[i]! < bMinX) bMinX = bx[i]!;
+            if (bx[i]! > bMaxX) bMaxX = bx[i]!;
+            if (by[i]! < bMinY) bMinY = by[i]!;
+            if (by[i]! > bMaxY) bMaxY = by[i]!;
+        }
+        return !(aMaxX < bMinX || bMaxX < aMinX || aMaxY < bMinY || bMaxY < aMinY);
     }
 
     // Spočítá pořadí, v jakém se mají polygony stejného materiálu aplikovat
@@ -1002,7 +1023,7 @@ export class SpravceTeles {
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
             } catch (e) {
-                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
             }
         }
 
@@ -1017,14 +1038,7 @@ export class SpravceTeles {
     }
 
     // Robustní test průsečíku dvou úseček.
-    //
-    // Místo cross-product porovnávání (d1>0 && d2<0 && …) používáme parametrické
-    // vyjádření: spočítáme průsečík přímek, na kterých úsečky leží, a ověříme,
-    // že leží STRIKTNĚ uvnitř obou úseček (s tolerancí od konců).
-    //
-    // Původní cross-product test selhával u téměř rovnoběžných hran, kde se
-    // znaménka d1..d4 překlápěla podle floating-point šumu – výsledkem byly
-    // falešné poplachy, které zmizely při nepatrném posunu vrcholu.
+    // Vrací true, pokud se úsečky protínají vnitřně (ne na koncích).
     private segmentySeKrizi(
         ax1: number, ay1: number, ax2: number, ay2: number,
         bx1: number, by1: number, bx2: number, by2: number
@@ -1072,17 +1086,6 @@ export class SpravceTeles {
             }
         }
         return false;
-    }
-
-    // Vrací true, pokud bod (px, py) leží na úsečce (ax, ay) - (bx, by).
-    private bodNaUsecke(px: number, py: number, ax: number, ay: number, bx: number, by: number): boolean {
-        const cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-        if (Math.abs(cross) > 1e-9) return false;
-        const minX = Math.min(ax, bx) - 1e-9;
-        const maxX = Math.max(ax, bx) + 1e-9;
-        const minY = Math.min(ay, by) - 1e-9;
-        const maxY = Math.max(ay, by) + 1e-9;
-        return px >= minX && px <= maxX && py >= minY && py <= maxY;
     }
 
     private cross(ax: number, ay: number, bx: number, by: number): number {
@@ -1582,111 +1585,6 @@ export class SpravceTeles {
         };
     }
 
-    upravBod(idTvaru: string, idVrcholu: string, modelX: number, modelY: number): void {
-        // 1. Nalezení polygonu a vrcholu
-        const indexTvaru = this.polygony.findIndex(p => p.id === idTvaru);
-        if (indexTvaru === -1) {
-            console.warn(`Polygon s ID ${idTvaru} nebyl nalezen.`);
-            return;
-        }
-
-        const polygon = this.polygony[indexTvaru]!;
-        const vrchol = polygon.vrcholy.find(v => v.id === idVrcholu);
-        
-        if (!vrchol) {
-            console.warn(`Vrchol s ID ${idVrcholu} nebyl nalezen.`);
-            return;
-        }
-
-        // 2. Úprava souřadnic a lokální přepočet
-        vrchol.x = modelX;
-        vrchol.y = modelY;
-        polygon.vypocet();
-
-        // 3. CHYTRÁ KONTROLA PRO OTVORY (MÍNUSOVÉ POLYGONY)
-        if (!polygon.kladne) {
-            // Převedení aktuálního otvoru do formátu polygon-clipping
-            const minusKruh = polygon.x_val.map((x, i) => [x, polygon.y_val[i]!] as [number, number]);
-            const formatMinus = [minusKruh];
-
-            let jeZcelaUvnitr = false;
-            let protinajiciPlusPoly: Polygon | null = null;
-            let protinajiciFormatPlus: polygonClipping.Geom | null = null;
-
-            // Kontrola proti všem existujícím kladným tělesům
-            for (let i = 0; i < this.polygony.length; i++) {
-                const plusPoly = this.polygony[i]!;
-                if (!plusPoly.kladne) continue;
-
-                const plusKruh = plusPoly.x_val.map((x, j) => [x, plusPoly.y_val[j]!] as [number, number]);
-                const formatPlus = [plusKruh];
-
-                // a) Zjistíme, zda je náš upravovaný otvor STÁLE ZCELA UVNITŘ
-                const zbytekZMinus = polygonClipping.difference([formatMinus], [formatPlus]);
-                if (zbytekZMinus.length === 0) {
-                    jeZcelaUvnitr = true;
-                    break; // Našli jsme rodiče a jsme uvnitř, můžeme testování ukončit
-                }
-
-                // b) Zjistíme, jestli se s tělesem alespoň částečně protínáme (pro případný ořez)
-                if (!protinajiciPlusPoly) {
-                    const prunik = polygonClipping.intersection([formatMinus], [formatPlus]);
-                    if (prunik.length > 0) {
-                        protinajiciPlusPoly = plusPoly;
-                        protinajiciFormatPlus = [formatPlus];
-                    }
-                }
-            }
-
-            // 4. Pokud otvor porušil hranici (není už zcela uvnitř), provedeme trvalý ořez a otvor smažeme
-            if (!jeZcelaUvnitr) {
-                if (protinajiciPlusPoly && protinajiciFormatPlus) {
-                    // Fyzické odečtení hmoty na rozhraní
-                    const vysledekOrezu = polygonClipping.difference(protinajiciFormatPlus, [formatMinus]);
-
-                    if (vysledekOrezu.length === 0) {
-                        // Kdyby uživatel roztáhl mínus do takových rozměrů, že by spolkl celý kladný polygon
-                        const indexPlus = this.polygony.findIndex(p => p.id === protinajiciPlusPoly!.id);
-                        if (indexPlus !== -1) this.polygony.splice(indexPlus, 1);
-                    } else {
-                        // Aplikování vykousnutého tvaru zpět
-                        for (let k = 0; k < vysledekOrezu.length; k++) {
-                            const polygonZastupce = vysledekOrezu[k]!;
-                            const vnejsiHranice = polygonZastupce[0]!;
-                            
-                            const noveX = vnejsiHranice.map(p => p[0]);
-                            const noveY = vnejsiHranice.map(p => p[1]);
-
-                            if (k === 0) {
-                                protinajiciPlusPoly.update(noveX, noveY, true, protinajiciPlusPoly.ro, protinajiciPlusPoly.E);
-                            } else {
-                                this.polygony.push(new Polygon(noveX, noveY, true, protinajiciPlusPoly.ro, protinajiciPlusPoly.E));
-                            }
-
-                            // Zachování případných nových děr vzniklých složitým ořezem (třeba spojení U-profilu)
-                            for (let h = 1; h < polygonZastupce.length; h++) {
-                                const diraHranice = polygonZastupce[h]!;
-                                const diraX = diraHranice.map(p => p[0]);
-                                const diraY = diraHranice.map(p => p[1]);
-                                this.polygony.push(new Polygon(diraX, diraY, false, protinajiciPlusPoly.ro, protinajiciPlusPoly.E));
-                            }
-                        }
-                    }
-                }
-
-                // Jelikož otvor vykonal své dílo (vykousl okraj) nebo byl vytažen zcela do prázdna,
-                // jako samostatná entita zaniká.
-                const aktualniIndex = this.polygony.findIndex(p => p.id === polygon.id);
-                if (aktualniIndex !== -1) {
-                    this.polygony.splice(aktualniIndex, 1);
-                }
-            }
-        }
-
-        // 5. Následná aktualizace veškerých průsečíků a linek
-        this.aktualizujPruseciky();
-    }
-
     // Uloží snapshot všech polygonů (včetně ID vrcholů), aby se dal stav
     // kdykoli vrátit. Používá se při editaci vrcholu pro real-time merge
     // a pro Esc (návrat do původního stavu).
@@ -1875,7 +1773,7 @@ export class SpravceTeles {
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
             } catch (e) {
-                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
             }
         }
 
@@ -2001,7 +1899,7 @@ export class SpravceTeles {
             const sorted = this.sortByDepth(newPolys);
             this.polygony = [...others, ...sorted];
             } catch (e) {
-                console.warn('Merge pipeline selhala (nechávám předchozí stav):', e);
+                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
             }
         }
 

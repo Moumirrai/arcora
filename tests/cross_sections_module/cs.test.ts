@@ -278,6 +278,7 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     it("1. Homogenní symetrický průřez (Obdélník 4x2)", () => {
         const p1 = new Polygon([0, 4, 4, 0], [0, 0, 2, 2], true, 1.0, 210);
         spravce.polygony.push(p1);
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(2, 5);
@@ -312,6 +313,7 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
         spravce.polygony.push(p1, p2);
 
         spravce.zvolene_E_ref = 210;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(40, 5);
@@ -345,6 +347,7 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
         const p2 = new Polygon([10, 30, 30, 10], [10, 10, 30, 30], false, 1.0, 210);
         spravce.polygony.push(p1, p2);
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(40, 5);
@@ -374,6 +377,7 @@ describe("Celkové charakteristiky průřezu - spocitejCelkove", () => {
     });
     
     it("4. Kontrola 0 hodnot při prázdném zadání", () => {
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(0, 5);
@@ -423,6 +427,7 @@ describe("Nehomogenní průřezy (Kombinace odlišných materiálů)", () => {
 
         // Nastavení referenčního modulu pružnosti na ocel
         spravce.zvolene_E_ref = 210;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         // Očekávané chování ideálního průřezu:
@@ -451,6 +456,7 @@ describe("Nehomogenní průřezy (Kombinace odlišných materiálů)", () => {
 
         // Referenční E nastavíme na tužší materiál
         spravce.zvolene_E_ref = 200; 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         // Výpočet ideální plochy:
@@ -479,6 +485,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([0, 100, 100, 0], [50, 50, 150, 150], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(150, 5);
@@ -524,6 +531,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([0, 100, 100, 0], [50, 50, 150, 150], 1, 7850, false);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(50, 5);
@@ -569,6 +577,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([30, 150, 150], [20, 500, 20], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
@@ -615,6 +624,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([250, 110, 110, 300], [0, 0, 300, 300], 1, 7850, false);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(spravce.polygony.length).toBe(1);
@@ -662,6 +672,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([50, 200, 200, 50], [50, 50, 100, 100], 1, 1, false);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(spravce.polygony.length).toBe(2);
@@ -709,6 +720,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([200, 250, 250, 200], [50, 50, 100, 100], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
@@ -754,6 +766,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
@@ -799,6 +812,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([1000, 1300, 1300, 1000], [0, 0, 500, 500], 1, 7850, false);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
@@ -844,6 +858,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([100, 300, 300, 100], [0, 0, 500, 500], 1, 7850, false);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(0, 5);
@@ -889,6 +904,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([100, 200, 200, 100], [0, 0, 300, 300], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(300, 5);
@@ -934,6 +950,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([300, 400, 400, 300], [0, 0, 400, 400], 1, 7850, true);
 
         spravce.zvolene_E_ref = 1;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(400, 5);
@@ -979,6 +996,7 @@ describe("Testování průniků polygonů", () => {
         spravce.zpracujNovyTvar([0, 400, 400, 0], [0, 0, 400, 400], 40, 7850, true);
 
         spravce.zvolene_E_ref = 40;
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejCelkove();
 
         expect(vysledky.celkova_vyska_h).toBeCloseTo(500, 5);
@@ -1051,6 +1069,7 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
             y_val: [1]
         }];
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
         expect(vysledky.rovnice.length).toBe(1);
@@ -1071,6 +1090,7 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
             y_val: [0, 0, 2, 2]
         }];
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         const rovina = vysledky.rovnice[0]!;
 
@@ -1090,6 +1110,7 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
             y_val: [2]
         }];
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         const rovina = vysledky.rovnice[0]!;
 
@@ -1111,6 +1132,7 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
             y_val: [0, 0]
         }];
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         const rovina = vysledky.rovnice[0]!;
 
@@ -1132,6 +1154,7 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
         spravce.polygony.push(p1, p2);
         spravce.zvolene_E_ref = 200; 
         spravce.spocitejCelkove(); 
+        spravce.prepocitejEfektivni();
     });
 
     it("1. Čistý centrický tlak - Napětí se skokově mění podle tuhosti materiálu", () => {
@@ -1288,6 +1311,7 @@ describe("Výpočet napětí pro náhodný průřez s nahodným zatížením", (
             y_val: [35]
         }];
 
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
         const rovinaPoly1 = vysledky.rovnice[0]!; 
@@ -1330,7 +1354,8 @@ describe("Výpočet napětí pro demonstrativní průřez z bakalářky", () => 
             x_val: [150],
             y_val: [260]
         }];
-
+        
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
         
         const rovinaPoly1 = vysledky.rovnice[0]!; 
@@ -1376,6 +1401,7 @@ describe("Výpočet napětí a směrnice nulových přímek napětí pro náhodn
             y_val: [35]
         }];
         
+        spravce.prepocitejEfektivni();
         const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
 
         const rovinaPoly1 = vysledky.rovnice[0]!; 
