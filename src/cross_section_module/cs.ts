@@ -953,9 +953,6 @@ export class SpravceTeles {
         const vrch = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu);
         if (!vrch) return { bowtie: false, blocked: false };
 
-        const origX = vrch.x;
-        const origY = vrch.y;
-
         // 3) Dočasně posunout
         vrch.x = x;
         vrch.y = y;
@@ -1086,10 +1083,6 @@ export class SpravceTeles {
             }
         }
         return false;
-    }
-
-    private cross(ax: number, ay: number, bx: number, by: number): number {
-        return ax * by - ay * bx;
     }
 
     // Vrátí aktuální materiál (E, ro) jako MultiPolygon.
