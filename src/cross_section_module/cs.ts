@@ -507,27 +507,22 @@ export class SpravceTeles {
 
         for (const m of serazene) {
             try {
-                // Rozdělit polygony materiálu na kladné a záporné (se sanitizací ringů)
-                const kladneRings: polygonClipping.Ring[] = [];
-                const zaporneRings: polygonClipping.Ring[] = [];
+                // Aplikujeme polygony V POŘADÍ, v jakém jsou v this.polygony.
+                // Toto je KLÍČOVÉ pro ostrůvky: [P1+, H−, I+] musí projít jako
+                // union(P1) → difference(H) → union(I), aby ostrůvek přežil.
+                // Batch varianta (všechny kladné najednou, pak všechny záporné)
+                // by ostrůvek sežrala dírou.
+                let mp: polygonClipping.MultiPolygon = [];
                 for (const p of this.polygony) {
                     if (p.E !== m.E || p.ro !== m.ro) continue;
                     const r = sanitizujRing(p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]));
                     if (r.length < 3) continue;
-                    (p.kladne ? kladneRings : zaporneRings).push(r);
-                }
-
-                // Batch union kladných: každý Ring obalíme do [ring], aby to byl Geom (Polygon).
-                let mp: polygonClipping.MultiPolygon = [];
-                if (kladneRings.length > 0) {
-                    const kladneGeom: polygonClipping.Geom[] = kladneRings.map(r => [r]);
-                    mp = polygonClipping.union(kladneGeom[0]!, ...kladneGeom.slice(1));
-                }
-
-                // Batch difference záporných (stejné obalení)
-                if (zaporneRings.length > 0 && mp.length > 0) {
-                    const zaporneGeom: polygonClipping.Geom[] = zaporneRings.map(r => [r]);
-                    mp = polygonClipping.difference(mp, zaporneGeom[0]!, ...zaporneGeom.slice(1));
+                    const ringGeom: polygonClipping.Geom = [r];
+                    if (p.kladne) {
+                        mp = polygonClipping.union(mp, ringGeom);
+                    } else {
+                        mp = polygonClipping.difference(mp, ringGeom);
+                    }
                 }
 
                 // Odečíst silnější materiály
@@ -569,6 +564,81 @@ export class SpravceTeles {
         }
 
         this.efektivniPolygony = vysledek;
+    }
+
+    // Vrátí obrys "spojené komponenty" aktivního polygonu - vezme aktivní
+    // polygon a rekurzivně k němu přidá jen ty polygony stejného materiálu,
+    // které s ním (nebo s již přidanými) mají neprázdný průnik.
+    //
+    // Tím se:
+    //   - dva nesouvisející polygony stejného materiálu zvýrazní jen jeden,
+    //   - dva protínající se polygony stejného materiálu zvýrazní sloučené.
+    public getOranzovyOutlineProAktivni(idTvaru: string): Polygon[] {
+        const aktivni = this.polygony.find(p => p.id === idTvaru);
+        if (!aktivni) return [];
+
+        const E = aktivni.E;
+        const ro = aktivni.ro;
+
+        // 1) Iterativně hledáme tranzitivní uzávěr přes průniky
+        const skupina = new Set<string>([aktivni.id]);
+        let zmena = true;
+        while (zmena) {
+            zmena = false;
+            for (const p of this.polygony) {
+                if (p.E !== E || p.ro !== ro) continue;
+                if (skupina.has(p.id)) continue;
+
+                let kontakt = false;
+                for (const id of skupina) {
+                    const clen = this.polygony.find(x => x.id === id);
+                    if (!clen) continue;
+                    const r1 = clen.x_val.map((x, i) => [x, clen.y_val[i]!] as [number, number]);
+                    const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
+                    try {
+                        const inter = polygonClipping.intersection([r1], [r2]);
+                        if (inter.length > 0) { kontakt = true; break; }
+                    } catch { /* numerická chyba → přeskočit */ }
+                }
+                if (kontakt) {
+                    skupina.add(p.id);
+                    zmena = true;
+                }
+            }
+        }
+
+        // 2) Union všech kladných polygonů ve skupině (záporné přeskočíme,
+        //    aktivní je vždy kladný, spojená komponenta má smysl jen pro kladné)
+        const kladneGeom: polygonClipping.Geom[] = [];
+        for (const id of skupina) {
+            const p = this.polygony.find(x => x.id === id);
+            if (!p || !p.kladne) continue;
+            const r = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
+            kladneGeom.push([r]);
+        }
+        if (kladneGeom.length === 0) return [];
+
+        let mp: polygonClipping.MultiPolygon;
+        try {
+            mp = polygonClipping.union(kladneGeom[0]!, ...kladneGeom.slice(1));
+        } catch {
+            // Fallback: vrať jen aktivní polygon jako jednu smyčku
+            const r = aktivni.x_val.map((x, i) => [x, aktivni.y_val[i]!] as [number, number]);
+            return [new Polygon(r.map(p => p[0]), r.map(p => p[1]), true, ro, E)];
+        }
+        mp = vycistiMultiPolygon(mp);
+
+        // 3) Rozložit na polygony (outer + díry)
+        const vysledek: Polygon[] = [];
+        for (const part of mp) {
+            const outer = part[0]!;
+            vysledek.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+            for (let h = 1; h < part.length; h++) {
+                const hole = part[h]!;
+                vysledek.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+            }
+        }
+        return vysledek;
     }
 
     private editSession: {
