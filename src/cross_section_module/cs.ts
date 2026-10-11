@@ -1804,6 +1804,19 @@ export class SpravceTeles {
             }
         }
 
+        // Fallback: vrcholy hrany v novém stavu neexistují (hrana byla
+        // pohlcena merge pipeline). Vrátíme ID kladného polygonu stejného
+        // materiálu, aby UI mohla pokračovat v editaci (a highlight zůstal).
+        const kandidatH = this.polygony.find(p =>
+            p.E === E && p.ro === ro && p.kladne
+        );
+        if (kandidatH) {
+            return {
+                bowtie: false,
+                blocked: false,
+                newIdTvaru: kandidatH.id,
+            };
+        }
         return { bowtie: false, blocked: false };
     }
 
@@ -1902,6 +1915,18 @@ export class SpravceTeles {
 
         if (refNew) {
             return { bowtie: false, blocked: false, newIdTvaru: refNew.idTvaru };
+        }
+
+        // Fallback: referenční vrchol v novém stavu neexistuje (typicky
+        // když byl aktivní polygon celý pohlcen jiným polygonem stejného
+        // materiálu a jeho vrcholy se staly vnitřními). Vrátíme ID jiného
+        // kladného polygonu stejného materiálu, aby UI mohla udržet
+        // aktivní stav (a oranžový outline) na sloučeném tvaru.
+        const kandidat = this.polygony.find(p =>
+            p.E === E && p.ro === ro && p.kladne
+        );
+        if (kandidat) {
+            return { bowtie: false, blocked: false, newIdTvaru: kandidat.id };
         }
         return { bowtie: false, blocked: false };
     }
