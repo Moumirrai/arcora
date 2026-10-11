@@ -617,6 +617,8 @@ export class SpravceTeles {
                     for (const id of skupina) {
                         const clen = this.polygony.find(x => x.id === id);
                         if (!clen) continue;
+                        // BBox pre-check: levné odfiltrování zjevně nesouvisejících párů.
+                        if (!this.bboxPrekryv(clen.x_val, clen.y_val, p.x_val, p.y_val)) continue;
                         const r1 = clen.x_val.map((x, i) => [x, clen.y_val[i]!] as [number, number]);
                         const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
                         try {
