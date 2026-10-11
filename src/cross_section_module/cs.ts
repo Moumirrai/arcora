@@ -653,13 +653,98 @@ export class SpravceTeles {
         return vysledek;
     }
 
+    // Obdoba getOranzovyOutlineProAktivni, ale pro multi-selekci.
+    // Vezme polygony obsahující vybrané vrcholy, udělá tranzitivní uzávěr
+    // přes průniky (per materiál) a vrátí sjednocený obrys.
+    public getOranzovyOutlineProMulti(multiIds: Set<string>): Polygon[] {
+        if (multiIds.size === 0) return [];
+
+        const dotcene = new Set<string>();
+        for (const p of this.polygony) {
+            for (const v of p.vrcholy) {
+                if (multiIds.has(v.id)) { dotcene.add(p.id); break; }
+            }
+        }
+        if (dotcene.size === 0) return [];
+
+        const materialy = new Set<string>();
+        for (const id of dotcene) {
+            const p = this.polygony.find(x => x.id === id);
+            if (p) materialy.add(`${p.E}|${p.ro}`);
+        }
+
+        const vysledek: Polygon[] = [];
+        for (const key of materialy) {
+            const [Estr, rostr] = key.split('|');
+            const E = Number(Estr);
+            const ro = Number(rostr);
+
+            const skupina = new Set<string>();
+            for (const id of dotcene) {
+                const p = this.polygony.find(x => x.id === id);
+                if (p && p.E === E && p.ro === ro) skupina.add(id);
+            }
+
+            let zmena = true;
+            while (zmena) {
+                zmena = false;
+                for (const p of this.polygony) {
+                    if (p.E !== E || p.ro !== ro) continue;
+                    if (skupina.has(p.id)) continue;
+                    let kontakt = false;
+                    for (const id of skupina) {
+                        const clen = this.polygony.find(x => x.id === id);
+                        if (!clen) continue;
+                        const r1 = clen.x_val.map((x, i) => [x, clen.y_val[i]!] as [number, number]);
+                        const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
+                        try {
+                            if (polygonClipping.intersection([r1], [r2]).length > 0) { kontakt = true; break; }
+                            if (this.ringUvnitrRingu(r1, r2) || this.ringUvnitrRingu(r2, r1)) { kontakt = true; break; }
+                            if (this.ringsSeKrizi(r1, r1.length - 1, r2, r2.length - 1)) { kontakt = true; break; }
+                        } catch { /* numerická chyba → přeskočit */ }
+                    }
+                    if (kontakt) { skupina.add(p.id); zmena = true; }
+                }
+            }
+
+            const kladneGeom: polygonClipping.Geom[] = [];
+            for (const id of skupina) {
+                const p = this.polygony.find(x => x.id === id);
+                if (!p || !p.kladne) continue;
+                const r = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
+                kladneGeom.push([r]);
+            }
+            if (kladneGeom.length === 0) continue;
+
+            let mp: polygonClipping.MultiPolygon;
+            try {
+                mp = polygonClipping.union(kladneGeom[0]!, ...kladneGeom.slice(1));
+            } catch { continue; }
+            mp = vycistiMultiPolygon(mp);
+
+            for (const part of mp) {
+                const outer = part[0]!;
+                vysledek.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+                for (let h = 1; h < part.length; h++) {
+                    const hole = part[h]!;
+                    vysledek.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+                }
+            }
+        }
+        return vysledek;
+    }
+
     private editSession: {
         idTvaru: string;
         idVrcholu: string;
         idVrcholu2: string | null; // null = vrchol/polygon; jinak = hrana
-        mode: 'vertex' | 'edge' | 'polygon';
+        mode: 'vertex' | 'edge' | 'polygon' | 'multi';
         snapshot: SnapshotPoly[];
     } | null = null;
+
+    // IDs vrcholů vybraných v multi-selekci (napříč polygony).
+    // Používá se pouze když editSession.mode === 'multi'.
+    public multiIds: string[] = [];
 
     // Detekuje geometrické kolize:
     //   1) self-intersection u jakéhokoli polygonu (i záporného),
@@ -775,6 +860,260 @@ export class SpravceTeles {
         return true;
     }
 
+    // Zahájí multi-editaci: uloží snapshot a seznam ID vybraných vrcholů.
+    public zacniMultiEditaci(ids: string[]): void {
+        const snapshot: SnapshotPoly[] = this.polygony.map(p => {
+            const unikatni: { id: string; x: number; y: number }[] = [];
+            const seen = new Set<string>();
+            for (const v of p.vrcholy) {
+                if (seen.has(v.id)) continue;
+                seen.add(v.id);
+                unikatni.push({ id: v.id, x: v.x, y: v.y });
+            }
+            return { id: p.id, kladne: p.kladne, ro: p.ro, E: p.E, vrcholy: unikatni };
+        });
+        this.multiIds = [...ids];
+        this.editSession = {
+            idTvaru: '',
+            idVrcholu: '',
+            idVrcholu2: null,
+            mode: 'multi',
+            snapshot,
+        };
+    }
+
+    // Posune všechny vybrané vrcholy o danou deltu a spustí MERGE PIPELINE
+    // pro každý materiál, kterého se změna dotkla. Stejná logika jako
+    // pohnPolygonem, ale pro sadu vrcholů napříč polygony.
+    public pohnMulti(deltaX: number, deltaY: number): { newIds: string[] } {
+        if (!this.editSession || this.editSession.mode !== 'multi') {
+            return { newIds: [] };
+        }
+        this.obnovSnapshot();
+
+        const idsSet = new Set(this.multiIds);
+        const pozicePoPosunu: Array<{ x: number; y: number }> = [];
+
+        // 1) Posunout vybrané vrcholy a zapamatovat si nové pozice
+        for (const p of this.polygony) {
+            const n = p.vrcholy.length;
+            const cnt = (n >= 2 && p.vrcholy[0] === p.vrcholy[n - 1]) ? n - 1 : n;
+            for (let i = 0; i < cnt; i++) {
+                const v = p.vrcholy[i]!;
+                if (idsSet.has(v.id)) {
+                    v.x += deltaX;
+                    v.y += deltaY;
+                    pozicePoPosunu.push({ x: v.x, y: v.y });
+                }
+            }
+            p.vypocet();
+        }
+
+        // 2) Zjistit, které materiály jsou dotčeny
+        const materialy = new Set<string>();
+        for (const p of this.polygony) {
+            for (const v of p.vrcholy) {
+                if (idsSet.has(v.id)) {
+                    materialy.add(`${p.E}|${p.ro}`);
+                    break;
+                }
+            }
+        }
+
+        // 3) Merge
+        const vysledek: Polygon[] = this.polygony.filter(
+            p => !materialy.has(`${p.E}|${p.ro}`)
+        );
+        for (const key of materialy) {
+            const [Estr, rostr] = key.split('|');
+            const E = Number(Estr);
+            const ro = Number(rostr);
+            vysledek.push(...this.mergeMultiMaterial(E, ro, idsSet));
+        }
+        this.polygony = vysledek;
+        this.aktualizujPruseciky();
+
+        // 4) Tracking pro UI: najít nová IDs vrcholů na zapamatovaných pozicích.
+        //    POZOR: this.multiIds NEMĚNÍME - zůstávají jako původní IDs ze
+        //    snapshotu, aby další frame mohl vrcholy znovu najít a posunout.
+        const newIds: string[] = [];
+        const seen = new Set<string>();
+        for (const poz of pozicePoPosunu) {
+            const nalezene = this.najdiVrcholBlizko(poz.x, poz.y, 1e-3);
+            if (nalezene && !seen.has(nalezene.idVrcholu)) {
+                seen.add(nalezene.idVrcholu);
+                newIds.push(nalezene.idVrcholu);
+            }
+        }
+        return { newIds };
+    }
+
+    // Merge pro jeden materiál v multi-selekci. Stejná logika jako
+    // pohnPolygonem, ale "editovaných polygonů" je více - všechny, které
+    // mají alespoň jeden vrchol v `multiVrcholyIds`.
+    private mergeMultiMaterial(E: number, ro: number, multiVrcholyIds: Set<string>): Polygon[] {
+        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
+        if (sameMat.length === 0) return [];
+
+        // Editované polygony = ty s alespoň jedním vrcholem v multiVrcholyIds
+        const editedIds = new Set<string>();
+        for (const p of sameMat) {
+            for (const v of p.vrcholy) {
+                if (multiVrcholyIds.has(v.id)) {
+                    editedIds.add(p.id);
+                    break;
+                }
+            }
+        }
+
+        const snap = this.editSession?.snapshot ?? [];
+        const snapMap = new Map(snap.map(s => [s.id, s]));
+
+        // Podstrom: pro každý editovaný polygon + rekurzivně vše uvnitř (v snapshotu)
+        const subtreeIds = new Set<string>();
+        for (const editedId of editedIds) {
+            subtreeIds.add(editedId);
+            const queue: string[] = [editedId];
+            while (queue.length > 0) {
+                const curId = queue.shift()!;
+                const curSnap = snapMap.get(curId);
+                if (!curSnap) continue;
+                const curRing: [number, number][] = curSnap.vrcholy.map(v => [v.x, v.y]);
+                for (const s of snap) {
+                    if (subtreeIds.has(s.id)) continue;
+                    const sRing: [number, number][] = s.vrcholy.map(v => [v.x, v.y]);
+                    if (this.ringUvnitrRingu(sRing, curRing)) {
+                        subtreeIds.add(s.id);
+                        queue.push(s.id);
+                    }
+                }
+            }
+        }
+
+        // Rozdělit a seřadit
+        const subtree = sameMat.filter(p => subtreeIds.has(p.id));
+        const zbytek = sameMat.filter(p => !subtreeIds.has(p.id));
+        const zbytekSorted = this.sortByDepthInSnapshot(zbytek, snap, snapMap);
+        const subtreeSorted = this.sortByDepthInSnapshot(subtree, snap, snapMap);
+        const ordered = [...zbytekSorted, ...subtreeSorted];
+
+        // Editované pozitivní ringy pro klipování potomků (v aktuálním i snapshot stavu)
+        const editedRings: Array<{ id: string; ring: [number, number][]; snapRing: [number, number][] }> = [];
+        for (const p of this.polygony) {
+            if (!p.kladne || !editedIds.has(p.id)) continue;
+            const snapP = snapMap.get(p.id);
+            const snapRing: [number, number][] = snapP
+                ? snapP.vrcholy.map(v => [v.x, v.y])
+                : p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
+            editedRings.push({
+                id: p.id,
+                ring: p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]),
+                snapRing,
+            });
+        }
+
+        let merged: polygonClipping.MultiPolygon = [];
+        for (const p of ordered) {
+            const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
+
+            const jePotomek = p.kladne && !editedIds.has(p.id) && subtreeIds.has(p.id);
+            if (jePotomek && editedRings.length > 0) {
+                // Klipujeme hranicí každého editovaného pozitivního polygonu,
+                // který potomka obsahuje v snapshotu.
+                const snapP = snapMap.get(p.id);
+                const snapRing: [number, number][] = snapP
+                    ? snapP.vrcholy.map(v => [v.x, v.y])
+                    : ring;
+
+                const obsahujici: [number, number][][] = [];
+                for (const er of editedRings) {
+                    if (er.id === p.id) continue;
+                    if (this.ringUvnitrRingu(snapRing, er.snapRing)) {
+                        obsahujici.push(er.ring);
+                    }
+                }
+
+                if (obsahujici.length > 0) {
+                    let pieces: polygonClipping.MultiPolygon = [[ring]];
+                    for (const er of obsahujici) {
+                        const oklejene: polygonClipping.MultiPolygon = [];
+                        for (const piece of pieces) {
+                            try {
+                                const pcs = polygonClipping.intersection([piece[0] as any], [er]);
+                                oklejene.push(...pcs);
+                            } catch { /* numerická chyba → přeskočit */ }
+                        }
+                        pieces = oklejene;
+                    }
+                    for (const piece of pieces) {
+                        merged = polygonClipping.union(merged, [piece]);
+                    }
+                } else {
+                    merged = polygonClipping.union(merged, [ring]);
+                }
+            } else if (p.kladne) {
+                merged = polygonClipping.union(merged, [ring]);
+            } else {
+                merged = polygonClipping.difference(merged, [ring]);
+            }
+        }
+        merged = vycistiMultiPolygon(merged);
+
+        const newPolys: Polygon[] = [];
+        for (const part of merged) {
+            const outer = part[0]!;
+            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+            for (let h = 1; h < part.length; h++) {
+                const hole = part[h]!;
+                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+            }
+        }
+        return this.sortByDepth(newPolys);
+    }
+
+    public potvrdMulti(): void {
+        this.multiIds = [];
+        this.editSession = null;
+    }
+
+    public zrusMulti(): void {
+        this.obnovSnapshot();
+        this.multiIds = [];
+        this.editSession = null;
+        this.aktualizujPruseciky();
+    }
+
+    // Smaže všechny vybrané vrcholy ze svých polygonů. Vrací info o výsledku.
+    public smazMultiVrcholy(): { uspech: boolean; pocetSmazanych: number } {
+        if (!this.multiIds || this.multiIds.length === 0) return { uspech: false, pocetSmazanych: 0 };
+
+        // Rozdělit ID podle polygonu
+        const idsSet = new Set(this.multiIds);
+        let smazano = 0;
+
+        for (const p of this.polygony) {
+            let unikatni = p.vrcholy;
+            if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+                unikatni = unikatni.slice(0, -1);
+            }
+            const novyVrcholy = unikatni.filter(v => !idsSet.has(v.id));
+            const pocetOdebranych = unikatni.length - novyVrcholy.length;
+            if (pocetOdebranych === 0) continue;
+            if (novyVrcholy.length < 3) continue; // přeskočit degenerované polygony
+
+            p.vrcholy = novyVrcholy;
+            p.vypocet();
+            smazano += pocetOdebranych;
+        }
+
+        this.normalizujVsechnyMaterialy();
+        this.aktualizujPruseciky();
+        this.multiIds = [];
+        this.editSession = null;
+
+        return { uspech: smazano > 0, pocetSmazanych: smazano };
+    }
+
     // Rychlý test, zda se bounding boxy dvou polygonů překrývají.
     // Levná varianta pro odfiltrování zjevně nesouvisejících párů
     // před drahým voláním polygon-clipping.intersection.
@@ -797,96 +1136,6 @@ export class SpravceTeles {
             if (by[i]! > bMaxY) bMaxY = by[i]!;
         }
         return !(aMaxX < bMinX || bMaxX < aMinX || aMaxY < bMinY || bMaxY < aMinY);
-    }
-
-    // Spočítá pořadí, v jakém se mají polygony stejného materiálu aplikovat
-    // při merge (union pro pozitiv, difference pro negativ).
-    //
-    // Klíčová myšlenka: aktivně editovaný polygon a všechny jeho "potomky"
-    // (polygony, které leží uvnitř něj - rekurzivně) tvoří tzv. PODSTROM,
-    // který se aplikuje jako celek až na konci. Uvnitř podstromu jde
-    // editovaný polygon první a jeho potomci po něm (podle hloubky).
-    //
-    // Proč to řeší konflikt:
-    //   - Editovaný otvor H1 prořízne cizí ostrůvek N2 (N2 je v "zbytku",
-    //     aplikuje se před podstromem H1 → H1 ho řeže).
-    //   - Editovaný otvor H1 ponechá svůj vlastní ostrůvek N1 (N1 je
-    //     v podstromu H1, aplikuje se po H1 → zůstane).
-    //   - Standalone kladný P2 (žádný podstrom) jde na konec → vyplní cizí
-    //     díru H1.
-    //   - Rodič P1 se posunem nestane "non-rodičem" - podstrom H1 se
-    //     aplikuje po P1, protože P1 je v "zbytku" s hloubkou 0.
-    private computeApplicationOrder(sameMat: Polygon[]): Polygon[] {
-        const snap = this.editSession?.snapshot ?? [];
-        const snapMap = new Map(snap.map(s => [s.id, s]));
-        const editedId = this.editSession?.idTvaru;
-
-        const edited = editedId ? sameMat.find(p => p.id === editedId) : undefined;
-        if (!edited) {
-            // Fallback: jen podle hloubky
-            return this.sortByDepthInSnapshot(sameMat, snap, snapMap);
-        }
-
-        // 1) Najdi celý podstrom editovaného polygonu (edited + rekurzivně
-        //    vše, co leží uvnitř něj). Používáme snapshot, ne aktuální stav,
-        //    aby se během dragu podstrom "nerozpadl", když se hrana dočasně
-        //    posune mimo potomka.
-        const subtreeIds = new Set<string>([edited.id]);
-        const queue: string[] = [edited.id];
-        while (queue.length > 0) {
-            const curId = queue.shift()!;
-            const curSnap = snapMap.get(curId);
-            if (!curSnap) continue;
-            const curRing: [number, number][] = curSnap.vrcholy.map(v => [v.x, v.y]);
-            for (const s of snap) {
-                if (subtreeIds.has(s.id)) continue;
-                const sRing: [number, number][] = s.vrcholy.map(v => [v.x, v.y]);
-                if (this.ringUvnitrRingu(sRing, curRing)) {
-                    subtreeIds.add(s.id);
-                    queue.push(s.id);
-                }
-            }
-        }
-
-        // 2) Rozdělit na podstrom a zbytek
-        const subtree = sameMat.filter(p => subtreeIds.has(p.id));
-        const zbytek = sameMat.filter(p => !subtreeIds.has(p.id));
-
-        // 3) Zbytek: vnější první (podle hloubky v snapshotu)
-        const zbytekSorted = this.sortByDepthInSnapshot(zbytek, snap, snapMap);
-
-        // 4) Podstrom: editovaný první, jeho děti po něm (podle hloubky)
-        const subtreeSorted = this.sortByDepthInSnapshot(subtree, snap, snapMap);
-
-        return [...zbytekSorted, ...subtreeSorted];
-    }
-
-        // Vrátí množinu ID všech polygonů v podstromu aktuálně editovaného polygonu
-    // (editovaný + rekurzivně vše, co v snapshotu leží uvnitř něj).
-    // Používá se pro klipování pozitivních potomků hranicí editovaného polygonu.
-    private computeSubtreeIdsFromSnapshot(): Set<string> {
-        const snap = this.editSession?.snapshot ?? [];
-        const snapMap = new Map(snap.map(s => [s.id, s]));
-        const editedId = this.editSession?.idTvaru;
-        const result = new Set<string>();
-        if (!editedId || !snapMap.has(editedId)) return result;
-        result.add(editedId);
-        const queue: string[] = [editedId];
-        while (queue.length > 0) {
-            const curId = queue.shift()!;
-            const curSnap = snapMap.get(curId);
-            if (!curSnap) continue;
-            const curRing: [number, number][] = curSnap.vrcholy.map(v => [v.x, v.y]);
-            for (const s of snap) {
-                if (result.has(s.id)) continue;
-                const sRing: [number, number][] = s.vrcholy.map(v => [v.x, v.y]);
-                if (this.ringUvnitrRingu(sRing, curRing)) {
-                    result.add(s.id);
-                    queue.push(s.id);
-                }
-            }
-        }
-        return result;
     }
 
     // Seřadí polygony podle hloubky vnoření v SNAPSHOTU (ne v aktuálním stavu).
@@ -947,85 +1196,28 @@ export class SpravceTeles {
         // 1) Vrátit snapshot
         this.obnovSnapshot();
 
-        // 2) Najít polygon a vrchol podle ORIGINÁLNÍCH ID z editSession
+        // 2) Najít polygon a vrchol
         const poly = this.polygony.find(p => p.id === this.editSession!.idTvaru);
         if (!poly) return { bowtie: false, blocked: false };
         const vrch = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu);
         if (!vrch) return { bowtie: false, blocked: false };
 
-        // 3) Dočasně posunout
+        // 3) Posunout vrchol
         vrch.x = x;
         vrch.y = y;
-
-        // 4) Přepočet polygonu s dočasnou pozicí.
-        //    Kontrolu degenerace (dva vrcholy na sobě) děláme až při commitu
-        //    v zkusMergeVrcholy(). Během dragu chceme uživateli dovolit dovést
-        //    vrchol A přesně na vrchol B, aby se pak mohl sloučit.
         poly.vypocet();
 
-        // 5) Bowtie
-        if (this.polygonSeProtinaSamSeSobou(poly)) {
-            this.aktualizujPruseciky();
-            return { bowtie: true, blocked: false };
-        }
-
-        // 6) Merge se stejnými materiály
+        // 4) Merge pipeline (stejná funkce jako multi-editace).
+        // Bowtie se neřeší samostatně - polygon-clipping union/difference
+        // ho vyřeší rozdělením polygonu na části.
         const E = poly.E;
         const ro = poly.ro;
-        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
+        const merged = this.mergeMultiMaterial(E, ro, new Set([this.editSession!.idVrcholu]));
+        this.polygony = [...others, ...merged];
 
-        if (sameMat.length >= 2) {
-            try {
-            const orderedSameMat = this.computeApplicationOrder(sameMat);
-            const subtreeIds = this.computeSubtreeIdsFromSnapshot();
-            const editedId = this.editSession!.idTvaru;
-
-            // Klipování: pokud je editovaný polygon pozitivní, klipujeme všechny
-            // jeho pozitivní potomky (ostrůvky) jeho aktuální hranicí. Tím se
-            // ostrůvky zmenšují / mizí, když hrana vnějšího polygonu přejede přes ně.
-            const editedPoly = this.polygony.find(p => p.id === editedId);
-            const editedRing: [number, number][] | null =
-                (editedPoly && editedPoly.kladne)
-                    ? editedPoly.x_val.map((xx, i) => [xx, editedPoly.y_val[i]!] as [number, number])
-                    : null;
-
-            let merged: polygonClipping.MultiPolygon = [];
-            for (const p of orderedSameMat) {
-                const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
-
-                if (editedRing && p.kladne && p.id !== editedId && subtreeIds.has(p.id)) {
-                    // Pozitivní potomek editovaného pozitivu → ořezat hranicí.
-                    const pieces = polygonClipping.intersection([ring], [editedRing]);
-                    for (const piece of pieces) {
-                        merged = polygonClipping.union(merged, [piece]);
-                    }
-                } else if (p.kladne) {
-                    merged = polygonClipping.union(merged, [ring]);
-                } else {
-                    merged = polygonClipping.difference(merged, [ring]);
-                }
-            }
-            merged = vycistiMultiPolygon(merged);
-
-            const newPolys: Polygon[] = [];
-            for (const part of merged) {
-                const outer = part[0]!;
-                newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
-                for (let h = 1; h < part.length; h++) {
-                    const hole = part[h]!;
-                    newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
-                }
-            }
-            const sorted = this.sortByDepth(newPolys);
-            this.polygony = [...others, ...sorted];
-            } catch (e) {
-                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
-            }
-        }
-
+        // 5) Tracking vrcholu po re-dekompozici
         const blizky = this.najdiVrcholBlizko(x, y, 1e-3);
-
         this.aktualizujPruseciky();
         return {
             bowtie: false,
@@ -1691,90 +1883,34 @@ export class SpravceTeles {
             return { bowtie: false, blocked: false };
         }
 
-        // 1) Vrátit snapshot
         this.obnovSnapshot();
 
-        // 2) Najít polygon a oba vrcholy podle ID z editSession
         const poly = this.polygony.find(p => p.id === this.editSession!.idTvaru);
         if (!poly) return { bowtie: false, blocked: false };
         const v1 = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu);
         const v2 = poly.vrcholy.find(v => v.id === this.editSession!.idVrcholu2);
         if (!v1 || !v2) return { bowtie: false, blocked: false };
 
-        // 3) Posunout oba vrcholy
-        v1.x += deltaX;
-        v1.y += deltaY;
-        v2.x += deltaX;
-        v2.y += deltaY;
+        v1.x += deltaX; v1.y += deltaY;
+        v2.x += deltaX; v2.y += deltaY;
 
         const p1x = v1.x, p1y = v1.y;
         const p2x = v2.x, p2y = v2.y;
 
-        // 4) Přepočet
         poly.vypocet();
 
-        // 5) Bowtie
-        if (this.polygonSeProtinaSamSeSobou(poly)) {
-            this.aktualizujPruseciky();
-            return { bowtie: true, blocked: false };
-        }
-
-        // 6) Merge pipeline (identická s pohnVrcholem)
         const E = poly.E;
         const ro = poly.ro;
-        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
+        const merged = this.mergeMultiMaterial(
+            E, ro,
+            new Set([this.editSession!.idVrcholu, this.editSession!.idVrcholu2!])
+        );
+        this.polygony = [...others, ...merged];
 
-        if (sameMat.length >= 2) {
-            try {
-            const orderedSameMat = this.computeApplicationOrder(sameMat);
-            const subtreeIds = this.computeSubtreeIdsFromSnapshot();
-            const editedId = this.editSession!.idTvaru;
-
-            const editedPoly = this.polygony.find(p => p.id === editedId);
-            const editedRing: [number, number][] | null =
-                (editedPoly && editedPoly.kladne)
-                    ? editedPoly.x_val.map((xx, i) => [xx, editedPoly.y_val[i]!] as [number, number])
-                    : null;
-
-            let merged: polygonClipping.MultiPolygon = [];
-            for (const p of orderedSameMat) {
-                const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
-
-                if (editedRing && p.kladne && p.id !== editedId && subtreeIds.has(p.id)) {
-                    const pieces = polygonClipping.intersection([ring], [editedRing]);
-                    for (const piece of pieces) {
-                        merged = polygonClipping.union(merged, [piece]);
-                    }
-                } else if (p.kladne) {
-                    merged = polygonClipping.union(merged, [ring]);
-                } else {
-                    merged = polygonClipping.difference(merged, [ring]);
-                }
-            }
-            merged = vycistiMultiPolygon(merged);
-
-            const newPolys: Polygon[] = [];
-            for (const part of merged) {
-                const outer = part[0]!;
-                newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
-                for (let h = 1; h < part.length; h++) {
-                    const hole = part[h]!;
-                    newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
-                }
-            }
-            const sorted = this.sortByDepth(newPolys);
-            this.polygony = [...others, ...sorted];
-            } catch (e) {
-                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
-            }
-        }
-
-        // 7) Tracking: najdi, kde skončily oba pohybované vrcholy, a vrať
-        //    nová ID + edgeIndex, aby UI mohla udržet highlight hrany.
+        // Tracking hrany
         const v1New = this.najdiVrcholBlizko(p1x, p1y, 1e-3);
         const v2New = this.najdiVrcholBlizko(p2x, p2y, 1e-3);
-
         this.aktualizujPruseciky();
 
         if (v1New && v2New && v1New.idTvaru === v2New.idTvaru) {
@@ -1804,18 +1940,10 @@ export class SpravceTeles {
             }
         }
 
-        // Fallback: vrcholy hrany v novém stavu neexistují (hrana byla
-        // pohlcena merge pipeline). Vrátíme ID kladného polygonu stejného
-        // materiálu, aby UI mohla pokračovat v editaci (a highlight zůstal).
-        const kandidatH = this.polygony.find(p =>
-            p.E === E && p.ro === ro && p.kladne
-        );
+        // Fallback: vrcholy hrany v novém stavu neexistují (pohlceno merge pipeline)
+        const kandidatH = this.polygony.find(p => p.E === E && p.ro === ro && p.kladne);
         if (kandidatH) {
-            return {
-                bowtie: false,
-                blocked: false,
-                newIdTvaru: kandidatH.id,
-            };
+            return { bowtie: false, blocked: false, newIdTvaru: kandidatH.id };
         }
         return { bowtie: false, blocked: false };
     }
@@ -1840,91 +1968,31 @@ export class SpravceTeles {
             unikatni = unikatni.slice(0, -1);
         }
 
-        // Pozice referenčního vrcholu PŘED posunem (pro tracking po merge)
         const refV = unikatni.find(v => v.id === this.editSession!.idVrcholu);
         const refTargetX = (refV?.x ?? 0) + deltaX;
         const refTargetY = (refV?.y ?? 0) + deltaY;
 
-        // Posun všech vrcholů
+        const editovaneVrcholy = new Set<string>();
         for (const v of unikatni) {
             v.x += deltaX;
             v.y += deltaY;
+            editovaneVrcholy.add(v.id);
         }
         poly.vypocet();
 
-        // Bowtie
-        if (this.polygonSeProtinaSamSeSobou(poly)) {
-            this.aktualizujPruseciky();
-            return { bowtie: true, blocked: false };
-        }
-
-        // Merge pipeline (identická s pohnVrcholem / pohnHranou)
         const E = poly.E;
         const ro = poly.ro;
-        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
         const others = this.polygony.filter(p => p.E !== E || p.ro !== ro);
+        const merged = this.mergeMultiMaterial(E, ro, editovaneVrcholy);
+        this.polygony = [...others, ...merged];
 
-        if (sameMat.length >= 2) {
-            try {
-            const orderedSameMat = this.computeApplicationOrder(sameMat);
-            const subtreeIds = this.computeSubtreeIdsFromSnapshot();
-            const editedId = this.editSession!.idTvaru;
-
-            const editedPoly = this.polygony.find(p => p.id === editedId);
-            const editedRing: [number, number][] | null =
-                (editedPoly && editedPoly.kladne)
-                    ? editedPoly.x_val.map((xx, i) => [xx, editedPoly.y_val[i]!] as [number, number])
-                    : null;
-
-            let merged: polygonClipping.MultiPolygon = [];
-            for (const p of orderedSameMat) {
-                const ring: [number, number][] = p.x_val.map((xx, i) => [xx, p.y_val[i]!] as [number, number]);
-
-                if (editedRing && p.kladne && p.id !== editedId && subtreeIds.has(p.id)) {
-                    const pieces = polygonClipping.intersection([ring], [editedRing]);
-                    for (const piece of pieces) {
-                        merged = polygonClipping.union(merged, [piece]);
-                    }
-                } else if (p.kladne) {
-                    merged = polygonClipping.union(merged, [ring]);
-                } else {
-                    merged = polygonClipping.difference(merged, [ring]);
-                }
-            }
-            merged = vycistiMultiPolygon(merged);
-
-            const newPolys: Polygon[] = [];
-            for (const part of merged) {
-                const outer = part[0]!;
-                newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
-                for (let h = 1; h < part.length; h++) {
-                    const hole = part[h]!;
-                    newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
-                }
-            }
-            const sorted = this.sortByDepth(newPolys);
-            this.polygony = [...others, ...sorted];
-            } catch (e) {
-                console.debug('Merge pipeline selhala (nechávám předchozí stav):', e);
-            }
-        }
-
-        // Tracking: najdi nový polygon podle pozice referenčního vrcholu
         const refNew = this.najdiVrcholBlizko(refTargetX, refTargetY, 1e-3);
         this.aktualizujPruseciky();
 
         if (refNew) {
             return { bowtie: false, blocked: false, newIdTvaru: refNew.idTvaru };
         }
-
-        // Fallback: referenční vrchol v novém stavu neexistuje (typicky
-        // když byl aktivní polygon celý pohlcen jiným polygonem stejného
-        // materiálu a jeho vrcholy se staly vnitřními). Vrátíme ID jiného
-        // kladného polygonu stejného materiálu, aby UI mohla udržet
-        // aktivní stav (a oranžový outline) na sloučeném tvaru.
-        const kandidat = this.polygony.find(p =>
-            p.E === E && p.ro === ro && p.kladne
-        );
+        const kandidat = this.polygony.find(p => p.E === E && p.ro === ro && p.kladne);
         if (kandidat) {
             return { bowtie: false, blocked: false, newIdTvaru: kandidat.id };
         }
