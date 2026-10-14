@@ -575,89 +575,6 @@ export class SpravceTeles {
         this.efektivniPolygony = vysledek;
     }
 
-    // Obdoba getOranzovyOutlineProAktivni, ale pro multi-selekci.
-    // Vezme polygony obsahující vybrané vrcholy, udělá tranzitivní uzávěr
-    // přes průniky (per materiál) a vrátí sjednocený obrys.
-    public getOranzovyOutlineProMulti(multiIds: Set<string>): Polygon[] {
-        if (multiIds.size === 0) return [];
-
-        const dotcene = new Set<string>();
-        for (const p of this.polygony) {
-            for (const v of p.vrcholy) {
-                if (multiIds.has(v.id)) { dotcene.add(p.id); break; }
-            }
-        }
-        if (dotcene.size === 0) return [];
-
-        const materialy = new Set<string>();
-        for (const id of dotcene) {
-            const p = this.polygony.find(x => x.id === id);
-            if (p) materialy.add(`${p.E}|${p.ro}`);
-        }
-
-        const vysledek: Polygon[] = [];
-        for (const key of materialy) {
-            const [Estr, rostr] = key.split('|');
-            const E = Number(Estr);
-            const ro = Number(rostr);
-
-            const skupina = new Set<string>();
-            for (const id of dotcene) {
-                const p = this.polygony.find(x => x.id === id);
-                if (p && p.E === E && p.ro === ro) skupina.add(id);
-            }
-
-            let zmena = true;
-            while (zmena) {
-                zmena = false;
-                for (const p of this.polygony) {
-                    if (p.E !== E || p.ro !== ro) continue;
-                    if (skupina.has(p.id)) continue;
-                    let kontakt = false;
-                    for (const id of skupina) {
-                        const clen = this.polygony.find(x => x.id === id);
-                        if (!clen) continue;
-                        // BBox pre-check: levné odfiltrování zjevně nesouvisejících párů.
-                        if (!this.bboxPrekryv(clen.x_val, clen.y_val, p.x_val, p.y_val)) continue;
-                        const r1 = clen.x_val.map((x, i) => [x, clen.y_val[i]!] as [number, number]);
-                        const r2 = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
-                        try {
-                            if (polygonClipping.intersection([r1], [r2]).length > 0) { kontakt = true; break; }
-                            if (this.ringUvnitrRingu(r1, r2) || this.ringUvnitrRingu(r2, r1)) { kontakt = true; break; }
-                            if (this.ringsSeKrizi(r1, r1.length - 1, r2, r2.length - 1)) { kontakt = true; break; }
-                        } catch { /* numerická chyba → přeskočit */ }
-                    }
-                    if (kontakt) { skupina.add(p.id); zmena = true; }
-                }
-            }
-
-            const kladneGeom: polygonClipping.Geom[] = [];
-            for (const id of skupina) {
-                const p = this.polygony.find(x => x.id === id);
-                if (!p || !p.kladne) continue;
-                const r = p.x_val.map((x, i) => [x, p.y_val[i]!] as [number, number]);
-                kladneGeom.push([r]);
-            }
-            if (kladneGeom.length === 0) continue;
-
-            let mp: polygonClipping.MultiPolygon;
-            try {
-                mp = polygonClipping.union(kladneGeom[0]!, ...kladneGeom.slice(1));
-            } catch { continue; }
-            mp = vycistiMultiPolygon(mp);
-
-            for (const part of mp) {
-                const outer = part[0]!;
-                vysledek.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
-                for (let h = 1; h < part.length; h++) {
-                    const hole = part[h]!;
-                    vysledek.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
-                }
-            }
-        }
-        return vysledek;
-    }
-
     private editSession: {
         snapshot: SnapshotPoly[];
     } | null = null;
@@ -997,13 +914,16 @@ export class SpravceTeles {
         this.aktualizujPruseciky();
     }
 
-    // Smaže všechny vybrané vrcholy ze svých polygonů. Vrací info o výsledku.
+    // Smaže všechny vybrané vrcholy ze svých polygonů.
+    // Pokud by polygon po smazání měl méně než 3 vrcholy, polygon se smaže
+    // jako celek (to pokrývá i případ, kdy uživatel označí celý polygon
+    // a zmáčkne Delete - polygon zmizí).
     public smazMultiVrcholy(): { uspech: boolean; pocetSmazanych: number } {
         if (!this.multiIds || this.multiIds.length === 0) return { uspech: false, pocetSmazanych: 0 };
 
-        // Rozdělit ID podle polygonu
         const idsSet = new Set(this.multiIds);
         let smazano = 0;
+        const prezivsi: Polygon[] = [];
 
         for (const p of this.polygony) {
             let unikatni = p.vrcholy;
@@ -1012,44 +932,30 @@ export class SpravceTeles {
             }
             const novyVrcholy = unikatni.filter(v => !idsSet.has(v.id));
             const pocetOdebranych = unikatni.length - novyVrcholy.length;
-            if (pocetOdebranych === 0) continue;
-            if (novyVrcholy.length < 3) continue; // přeskočit degenerované polygony
+            if (pocetOdebranych === 0) {
+                // Nic se neodebírá, polygon zůstává
+                prezivsi.push(p);
+                continue;
+            }
+            if (novyVrcholy.length < 3) {
+                // Polygon by měl méně než 3 vrcholy → smažeme celý polygon
+                smazano += unikatni.length;
+                continue;
+            }
 
             p.vrcholy = novyVrcholy;
             p.vypocet();
             smazano += pocetOdebranych;
+            prezivsi.push(p);
         }
 
+        this.polygony = prezivsi;
         this.normalizujVsechnyMaterialy();
         this.aktualizujPruseciky();
         this.multiIds = [];
         this.editSession = null;
 
         return { uspech: smazano > 0, pocetSmazanych: smazano };
-    }
-
-    // Rychlý test, zda se bounding boxy dvou polygonů překrývají.
-    // Levná varianta pro odfiltrování zjevně nesouvisejících párů
-    // před drahým voláním polygon-clipping.intersection.
-    private bboxPrekryv(
-        ax: number[], ay: number[],
-        bx: number[], by: number[]
-    ): boolean {
-        let aMinX = Infinity, aMaxX = -Infinity, aMinY = Infinity, aMaxY = -Infinity;
-        for (let i = 0; i < ax.length; i++) {
-            if (ax[i]! < aMinX) aMinX = ax[i]!;
-            if (ax[i]! > aMaxX) aMaxX = ax[i]!;
-            if (ay[i]! < aMinY) aMinY = ay[i]!;
-            if (ay[i]! > aMaxY) aMaxY = ay[i]!;
-        }
-        let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
-        for (let i = 0; i < bx.length; i++) {
-            if (bx[i]! < bMinX) bMinX = bx[i]!;
-            if (bx[i]! > bMaxX) bMaxX = bx[i]!;
-            if (by[i]! < bMinY) bMinY = by[i]!;
-            if (by[i]! > bMaxY) bMaxY = by[i]!;
-        }
-        return !(aMaxX < bMinX || bMaxX < aMinX || aMaxY < bMinY || bMaxY < aMinY);
     }
 
     // Seřadí polygony podle hloubky vnoření v SNAPSHOTU (ne v aktuálním stavu).
