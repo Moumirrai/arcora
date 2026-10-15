@@ -725,19 +725,23 @@ export class SpravceTeles {
         const idsSet = new Set(this.multiIds);
         const pozicePoPosunu: Array<{ x: number; y: number }> = [];
 
-        // 1) Posunout vybrané vrcholy a zapamatovat si nové pozice
+        // 1) Posunout vybrané vrcholy a zapamatovat si nové pozice.
+        //    `vypocet()` voláme jen na polygonech, které měly opravdu posunutý
+        //    vrchol (ostatní se nemohly změnit).
         for (const p of this.polygony) {
             const n = p.vrcholy.length;
             const cnt = (n >= 2 && p.vrcholy[0] === p.vrcholy[n - 1]) ? n - 1 : n;
+            let zmena = false;
             for (let i = 0; i < cnt; i++) {
                 const v = p.vrcholy[i]!;
                 if (idsSet.has(v.id)) {
                     v.x += deltaX;
                     v.y += deltaY;
                     pozicePoPosunu.push({ x: v.x, y: v.y });
+                    zmena = true;
                 }
             }
-            p.vypocet();
+            if (zmena) p.vypocet();
         }
 
         // 2) Zjistit, které materiály jsou dotčeny
@@ -762,7 +766,9 @@ export class SpravceTeles {
             vysledek.push(...this.mergeMultiMaterial(E, ro, idsSet));
         }
         this.polygony = vysledek;
-        this.aktualizujPruseciky();
+        // POZNÁMKA: aktualizujPruseciky() se během dragu NEVOLÁ (je O(N² × m²)
+        // a pro velké polygony extrémně drahá). Přepočítá se až při commitu
+        // v App.svelte (viz aktualizujVysledky).
 
         // 4) Tracking pro UI: najít nová IDs vrcholů na zapamatovaných pozicích.
         //    POZOR: this.multiIds NEMĚNÍME - zůstávají jako původní IDs ze
@@ -786,51 +792,113 @@ export class SpravceTeles {
         const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
         if (sameMat.length === 0) return [];
 
+        // Detekce self-intersection (bowtie) na editovaných polygonech.
+        // Pokud některý editovaný polygon tvoří bowtie, nesmíme skipovat
+        // merge pipeline - polygon-clipping.union ho musí rozdělit na části.
+        // Testujeme jen editované polygony (s vybraným vrcholem), protože
+        // ostatní by měly být v pořádku a test je drahý (O(m²)).
+        const maSelfIntersect = sameMat.some(p => {
+            let editovany = false;
+            for (const v of p.vrcholy) {
+                if (multiVrcholyIds.has(v.id)) { editovany = true; break; }
+            }
+            return editovany && this.polygonSeProtinaSamSeSobou(p);
+        });
+
+        // Skip pro jediný polygon - jen pokud nemá bowtie.
+        if (sameMat.length === 1 && !maSelfIntersect) {
+            return sameMat;
+        }
+
         // Editované polygony = ty s alespoň jedním vrcholem v multiVrcholyIds
         const editedIds = new Set<string>();
         for (const p of sameMat) {
             for (const v of p.vrcholy) {
-                if (multiVrcholyIds.has(v.id)) {
-                    editedIds.add(p.id);
-                    break;
+                if (multiVrcholyIds.has(v.id)) { editedIds.add(p.id); break; }
+            }
+        }
+
+        // --- Komponenta editovaných polygonů (BFS přes BBox kontakt) ---
+        // Začneme editovanými polygony a postupně přidáváme všechny, jejichž
+        // bounding box se dotýká BBoxu už zařazených. Tím dostaneme uzavřenou
+        // skupinu, kterou je potřeba přepočítat. Zbytek (nesouvisející polygony)
+        // vrátíme beze změny - ušetříme tím drahý union/difference.
+        //
+        // Pozn.: BBox kontakt je nadsazený (BBoxy se mohou dotýkat, ale tvary
+        // ne). Do komponenty se tedy občas zařadí víc, než by bylo nutné, ale
+        // nikdy to nezpůsobí chybný výsledek - jen trochu víc práce.
+        const komponenta = new Set<string>(editedIds);
+        const queue: string[] = Array.from(editedIds);
+        while (queue.length > 0) {
+            const curId = queue.shift()!;
+            const cur = sameMat.find(x => x.id === curId);
+            if (!cur) continue;
+            for (const p of sameMat) {
+                if (komponenta.has(p.id)) continue;
+                if (this.bboxPrekryv(p.x_val, p.y_val, cur.x_val, cur.y_val)) {
+                    komponenta.add(p.id);
+                    queue.push(p.id);
                 }
             }
         }
 
+        // Rozdělit na komponentu a zbytek
+        const vKomponente = sameMat.filter(p => komponenta.has(p.id));
+        const mimoKomponentu = sameMat.filter(p => !komponenta.has(p.id));
+
+        // Pokud je v komponentě jen jediný polygon a nemá bowtie,
+        // není co mergovat - vrátíme vše jak je.
+        if (vKomponente.length === 1 && !maSelfIntersect) {
+            return sameMat;
+        }
+
+        // Pokud se komponenta skládá jen z editovaných polygonů (žádný
+        // ne-editovaný), BBox pre-check přeskočíme a jdeme rovnou na merge.
+        // (Tohle je heuristika: pokud jsou v komponentě jen editované, není
+        // potřeba union mezi nimi a ne-editovanými - ale může být potřeba
+        // union mezi editovanými navzájem, viz např. 2 polygony stejného
+        // materiálu tažené přes sebe.)
+
         const snap = this.editSession?.snapshot ?? [];
         const snapMap = new Map(snap.map(s => [s.id, s]));
 
-        // Podstrom: pro každý editovaný polygon + rekurzivně vše uvnitř (v snapshotu)
+        // Podstrom: pro každý editovaný polygon + rekurzivně vše uvnitř (v snapshotu).
+        // POZOR: subtreeIds omezeno na komponentu - jinak bychom mohli zařadit
+        // i polygony z jiné komponenty, které se náhodou nacházejí uvnitř
+        // editovaného polygonu v snapshotu. Což by ale znamenalo, že se jedná
+        // o stejnou komponentu (kontakt přes vnoření), takže by už v komponentě
+        // byly. Pro jistotu je filtrujeme.
         const subtreeIds = new Set<string>();
         for (const editedId of editedIds) {
             subtreeIds.add(editedId);
-            const queue: string[] = [editedId];
-            while (queue.length > 0) {
-                const curId = queue.shift()!;
+            const q: string[] = [editedId];
+            while (q.length > 0) {
+                const curId = q.shift()!;
                 const curSnap = snapMap.get(curId);
                 if (!curSnap) continue;
                 const curRing: [number, number][] = curSnap.vrcholy.map(v => [v.x, v.y]);
                 for (const s of snap) {
                     if (subtreeIds.has(s.id)) continue;
+                    if (!komponenta.has(s.id)) continue;
                     const sRing: [number, number][] = s.vrcholy.map(v => [v.x, v.y]);
                     if (this.ringUvnitrRingu(sRing, curRing)) {
                         subtreeIds.add(s.id);
-                        queue.push(s.id);
+                        q.push(s.id);
                     }
                 }
             }
         }
 
-        // Rozdělit a seřadit
-        const subtree = sameMat.filter(p => subtreeIds.has(p.id));
-        const zbytek = sameMat.filter(p => !subtreeIds.has(p.id));
+        // Rozdělit komponentu na podstrom a zbytek
+        const subtree = vKomponente.filter(p => subtreeIds.has(p.id));
+        const zbytek = vKomponente.filter(p => !subtreeIds.has(p.id));
         const zbytekSorted = this.sortByDepthInSnapshot(zbytek, snap, snapMap);
         const subtreeSorted = this.sortByDepthInSnapshot(subtree, snap, snapMap);
         const ordered = [...zbytekSorted, ...subtreeSorted];
 
-        // Editované pozitivní ringy pro klipování potomků (v aktuálním i snapshot stavu)
+        // Editované pozitivní ringy pro klipování potomků
         const editedRings: Array<{ id: string; ring: [number, number][]; snapRing: [number, number][] }> = [];
-        for (const p of this.polygony) {
+        for (const p of vKomponente) {
             if (!p.kladne || !editedIds.has(p.id)) continue;
             const snapP = snapMap.get(p.id);
             const snapRing: [number, number][] = snapP
@@ -849,8 +917,6 @@ export class SpravceTeles {
 
             const jePotomek = p.kladne && !editedIds.has(p.id) && subtreeIds.has(p.id);
             if (jePotomek && editedRings.length > 0) {
-                // Klipujeme hranicí každého editovaného pozitivního polygonu,
-                // který potomka obsahuje v snapshotu.
                 const snapP = snapMap.get(p.id);
                 const snapRing: [number, number][] = snapP
                     ? snapP.vrcholy.map(v => [v.x, v.y])
@@ -899,12 +965,89 @@ export class SpravceTeles {
                 newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
             }
         }
-        return this.sortByDepth(newPolys);
+        const sortedNewPolys = this.sortByDepth(newPolys);
+
+        // Vrátit komponentu (přepočítanou) + zbytek (beze změny)
+        return [...mimoKomponentu, ...sortedNewPolys];
     }
 
     public potvrdMulti(): void {
+        const novyPolygony: Polygon[] = [];
+
+        for (const p of this.polygony) {
+            let unikatni = p.vrcholy;
+            if (unikatni.length >= 2 && unikatni[0] === unikatni[unikatni.length - 1]) {
+                unikatni = unikatni.slice(0, -1);
+            }
+            const n = unikatni.length;
+
+            // 1) Deduplikace sousedních vrcholů na stejné pozici.
+            const bezSousedu: Vrchol[] = [];
+            for (let i = 0; i < n; i++) {
+                const v = unikatni[i]!;
+                const dalsi = unikatni[(i + 1) % n]!;
+                if (Math.abs(v.x - dalsi.x) < 1e-6 && Math.abs(v.y - dalsi.y) < 1e-6) {
+                    continue;
+                }
+                bezSousedu.push(v);
+            }
+
+            // 2) Detekce self-touch (dva NESOUSEDÉ vrcholy na stejné pozici).
+            const m = bezSousedu.length;
+            let selfTouch: [number, number] | null = null;
+            for (let i = 0; i < m && !selfTouch; i++) {
+                for (let j = i + 1; j < m; j++) {
+                    if (j === i + 1) continue;
+                    if (i === 0 && j === m - 1) continue;
+                    if (Math.abs(bezSousedu[i]!.x - bezSousedu[j]!.x) < 1e-6
+                     && Math.abs(bezSousedu[i]!.y - bezSousedu[j]!.y) < 1e-6) {
+                        selfTouch = [i, j];
+                        break;
+                    }
+                }
+            }
+
+            if (selfTouch) {
+                // Rozdělíme polygon na dvě smyčky v místě self-touch.
+                const [i, j] = selfTouch;
+                const smycka1 = bezSousedu.slice(i, j + 1);
+                const smycka2 = [
+                    ...bezSousedu.slice(j),
+                    ...bezSousedu.slice(0, i + 1)
+                ];
+                for (const s of [smycka1, smycka2]) {
+                    const s2 = [...s];
+                    // Uzavírací vrchol je duplikát prvního - odebereme.
+                    if (s2.length >= 2
+                        && Math.abs(s2[0]!.x - s2[s2.length - 1]!.x) < 1e-6
+                        && Math.abs(s2[0]!.y - s2[s2.length - 1]!.y) < 1e-6) {
+                        s2.pop();
+                    }
+                    if (s2.length < 3) continue; // spike nebo degenerovaná → vyhodit
+                    try {
+                        novyPolygony.push(new Polygon(
+                            s2.map(v => v.x), s2.map(v => v.y),
+                            p.kladne, p.ro, p.E
+                        ));
+                    } catch { /* degenerovaná, přeskočit */ }
+                }
+            } else {
+                // Žádný self-touch - klasická cesta.
+                if (bezSousedu.length >= 3) {
+                    if (bezSousedu.length !== n) {
+                        p.vrcholy = bezSousedu;
+                        p.vypocet();
+                    }
+                    novyPolygony.push(p);
+                }
+                // jinak polygon degeneroval → vyhodit
+            }
+        }
+
+        this.polygony = novyPolygony;
         this.multiIds = [];
         this.editSession = null;
+        this.aktualizujPruseciky();
     }
 
     public zrusMulti(): void {
@@ -1102,6 +1245,27 @@ export class SpravceTeles {
             if (intersect) inside = !inside;
         }
         return inside;
+    }
+
+    // Rychlý test, zda se bounding boxy dvou množin vrcholů překrývají.
+    // Levná varianta pro odfiltrování zjevně nesouvisejících párů
+    // před drahým voláním polygon-clipping.union.
+    private bboxPrekryv(xsA: number[], ysA: number[], xsB: number[], ysB: number[]): boolean {
+        let aMinX = Infinity, aMaxX = -Infinity, aMinY = Infinity, aMaxY = -Infinity;
+        for (let i = 0; i < xsA.length; i++) {
+            if (xsA[i]! < aMinX) aMinX = xsA[i]!;
+            if (xsA[i]! > aMaxX) aMaxX = xsA[i]!;
+            if (ysA[i]! < aMinY) aMinY = ysA[i]!;
+            if (ysA[i]! > aMaxY) aMaxY = ysA[i]!;
+        }
+        let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+        for (let i = 0; i < xsB.length; i++) {
+            if (xsB[i]! < bMinX) bMinX = xsB[i]!;
+            if (xsB[i]! > bMaxX) bMaxX = xsB[i]!;
+            if (ysB[i]! < bMinY) bMinY = ysB[i]!;
+            if (ysB[i]! > bMaxY) bMaxY = ysB[i]!;
+        }
+        return !(aMaxX < bMinX || bMaxX < aMinX || aMaxY < bMinY || bMaxY < aMinY);
     }
 
     // Vrátí ID SOUROVÉHO polygonu, jehož ring obsahuje bod (x, y).
