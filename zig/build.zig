@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
     });
-    const optimize = .ReleaseSmall;
+    const optimize: std.builtin.OptimizeMode = .ReleaseSmall;
 
     const lib = b.addExecutable(.{
         .name = "arcora",
