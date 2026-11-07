@@ -807,26 +807,37 @@ export class SpravceTeles {
         });
         if (sameMat.length === 0) return [];
 
-        // Bypass pro zatížení s 1-2 body: neslučujeme.
-        if (typ === 'zatizeni' && sameMat.some(p => {
-            let u = p.vrcholy.length;
-            if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
-            return u < 3;
-        })) {
-            return sameMat;
+        // Pro zatížení: 1-2 bodové polygony (body a linie) nejsou součástí merge
+        // pipeline. Vrátíme je jako "mimo komponentu" a mergujeme jen 3+.
+        let jednoducheZatizeni: Polygon[] = [];
+        let sameMatFiltrovane: Polygon[] = sameMat;
+        if (typ === 'zatizeni') {
+            sameMatFiltrovane = [];
+            for (const p of sameMat) {
+                let u = p.vrcholy.length;
+                if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
+                if (u < 3) jednoducheZatizeni.push(p);
+                else sameMatFiltrovane.push(p);
+            }
+            // Pokud nejsou žádné 3+ polygony, vrátíme jen 1-2 body.
+            if (sameMatFiltrovane.length === 0) {
+                return jednoducheZatizeni;
+            }
         }
 
-        const maSelfIntersect = sameMat.some(p => {
+        const maSelfIntersect = sameMatFiltrovane.some(p => {
             let editovany = false;
             for (const v of p.vrcholy) if (multiVrcholyIds.has(v.id)) { editovany = true; break; }
             return editovany && this.polygonSeProtinaSamSeSobou(p);
         });
 
-        if (sameMat.length === 1 && !maSelfIntersect) return sameMat;
+        if (sameMatFiltrovane.length === 1 && !maSelfIntersect) {
+            return [...sameMatFiltrovane, ...jednoducheZatizeni];
+        }
 
         // Editované polygony = ty s alespoň jedním vrcholem v multiVrcholyIds
         const editedIds = new Set<string>();
-        for (const p of sameMat) {
+        for (const p of sameMatFiltrovane) {
             for (const v of p.vrcholy) {
                 if (multiVrcholyIds.has(v.id)) { editedIds.add(p.id); break; }
             }
@@ -845,9 +856,9 @@ export class SpravceTeles {
         const queue: string[] = Array.from(editedIds);
         while (queue.length > 0) {
             const curId = queue.shift()!;
-            const cur = sameMat.find(x => x.id === curId);
+            const cur = sameMatFiltrovane.find(x => x.id === curId);
             if (!cur) continue;
-            for (const p of sameMat) {
+            for (const p of sameMatFiltrovane) {
                 if (komponenta.has(p.id)) continue;
                 if (this.bboxPrekryv(p.x_val, p.y_val, cur.x_val, cur.y_val)) {
                     komponenta.add(p.id);
@@ -857,13 +868,13 @@ export class SpravceTeles {
         }
 
         // Rozdělit na komponentu a zbytek
-        const vKomponente = sameMat.filter(p => komponenta.has(p.id));
-        const mimoKomponentu = sameMat.filter(p => !komponenta.has(p.id));
+        const vKomponente = sameMatFiltrovane.filter(p => komponenta.has(p.id));
+        const mimoKomponentu = sameMatFiltrovane.filter(p => !komponenta.has(p.id));
 
         // Pokud je v komponentě jen jediný polygon a nemá bowtie,
         // není co mergovat - vrátíme vše jak je.
         if (vKomponente.length === 1 && !maSelfIntersect) {
-            return sameMat;
+            return [...sameMatFiltrovane, ...jednoducheZatizeni];
         }
 
         // Pokud se komponenta skládá jen z editovaných polygonů (žádný
@@ -981,8 +992,8 @@ export class SpravceTeles {
         }
         const sortedNewPolys = this.sortByDepth(newPolys);
 
-        // Vrátit komponentu (přepočítanou) + zbytek (beze změny)
-        return [...mimoKomponentu, ...sortedNewPolys];
+        // Vrátit komponentu (přepočítanou) + zbytek (beze změny) + 1-2 body
+        return [...mimoKomponentu, ...sortedNewPolys, ...jednoducheZatizeni];
     }
 
     public potvrdMulti(): void {
@@ -996,14 +1007,21 @@ export class SpravceTeles {
             const n = unikatni.length;
 
             // 1) Deduplikace sousedních vrcholů na stejné pozici.
+            // Pro jednoduchá zatížení (1-2 body) deduplikaci přeskočíme, protože:
+            //  - u 1 bodu je "soused" on sám a deduplikace by bod smazala,
+            //  - u 2 bodů se body překrývat nemohou (to by byla degenerovaná čára).
             const bezSousedu: Vrchol[] = [];
-            for (let i = 0; i < n; i++) {
-                const v = unikatni[i]!;
-                const dalsi = unikatni[(i + 1) % n]!;
-                if (Math.abs(v.x - dalsi.x) < 1e-6 && Math.abs(v.y - dalsi.y) < 1e-6) {
-                    continue;
+            if (p.typ === 'zatizeni' && n < 3) {
+                for (let i = 0; i < n; i++) bezSousedu.push(unikatni[i]!);
+            } else {
+                for (let i = 0; i < n; i++) {
+                    const v = unikatni[i]!;
+                    const dalsi = unikatni[(i + 1) % n]!;
+                    if (Math.abs(v.x - dalsi.x) < 1e-6 && Math.abs(v.y - dalsi.y) < 1e-6) {
+                        continue;
+                    }
+                    bezSousedu.push(v);
                 }
-                bezSousedu.push(v);
             }
 
             // 2) Detekce self-touch (dva NESOUSEDÉ vrcholy na stejné pozici).
@@ -1047,7 +1065,10 @@ export class SpravceTeles {
                 }
             } else {
                 // Žádný self-touch - klasická cesta.
-                if (bezSousedu.length >= 3) {
+                // Pro materiály musí zůstat alespoň 3 vrcholy, pro jednoduchá
+                // zatížení stačí 1-2 (bod nebo čára).
+                const minBody = p.typ === 'zatizeni' ? 1 : 3;
+                if (bezSousedu.length >= minBody) {
                     if (bezSousedu.length !== n) {
                         p.vrcholy = bezSousedu;
                         p.vypocet();
@@ -1351,11 +1372,17 @@ export class SpravceTeles {
         else newMaterial = polygonClipping.difference(current, [novyKruh]);
         newMaterial = vycistiMultiPolygon(newMaterial);
 
-        // Zachovat ostatní polygony (jiný typ, jiný materiál, jiná hodnota zatížení)
+        // Zachovat ostatní polygony (jiný typ, jiný materiál, jiná hodnota zatížení).
+        // POZOR: pro zatížení stejné hodnoty musíme zachovat 1-2 bodové polygony
+        // (body a linie), protože nejsou součástí merge pipeline.
         const otherPolys = this.polygony.filter(p => {
             if (p.typ !== typ) return true;
             if (typ === 'material') return p.E !== E || p.ro !== ro;
-            return p.hodnotaZatizeni !== hodnotaZatizeni;
+            if (p.hodnotaZatizeni !== hodnotaZatizeni) return true;
+            // Stejná hodnota zatížení: zachovat jen 1-2 bodové
+            let u = p.vrcholy.length;
+            if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
+            return u < 3;
         });
 
         const newPolys: Polygon[] = [];
@@ -1379,7 +1406,11 @@ export class SpravceTeles {
         const sameMat = this.polygony.filter(p => {
             if (p.typ !== typ) return false;
             if (typ === 'material') return p.E === E && p.ro === ro;
-            return p.hodnotaZatizeni === hodnotaZatizeni;
+            if (p.hodnotaZatizeni !== hodnotaZatizeni) return false;
+            // Pro zatížení: normalizujeme jen 3+ polygony, 1-2 body necháváme být
+            let u = p.vrcholy.length;
+            if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
+            return u >= 3;
         });
         if (sameMat.length === 0) return [];
 
@@ -1426,6 +1457,15 @@ export class SpravceTeles {
         }
 
         const all: Polygon[] = [];
+        // 1-2 bodová zatížení (body a linie) nejsou součástí normalizace,
+        // takže je musíme do výstupu přidat beze změny.
+        for (const p of this.polygony) {
+            if (p.typ === 'zatizeni') {
+                let u = p.vrcholy.length;
+                if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
+                if (u < 3) all.push(p);
+            }
+        }
         for (const { E, ro } of materialy.values()) {
             all.push(...this.normalizujMaterial(E, ro, 'material', undefined));
         }
