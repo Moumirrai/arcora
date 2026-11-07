@@ -5,6 +5,8 @@ interface SnapshotPoly {
     kladne: boolean;
     ro: number;
     E: number;
+    typ: 'material' | 'zatizeni';
+    hodnotaZatizeni?: number | undefined;
     vrcholy: Array<{ id: string; x: number; y: number }>;
 }
 
@@ -273,6 +275,8 @@ export class Polygon {
     ro: number;
     E: number;
     id: string;
+    typ: 'material' | 'zatizeni';      
+    hodnotaZatizeni?: number | undefined;   
 
     vysledky?: {
         smernice: Smernice[];
@@ -293,21 +297,19 @@ export class Polygon {
         return this.vrcholy.map(v => v.y);
     }
 
-    constructor(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number, id?: string) {
+    constructor(x_values: number[], y_values: number[], kladne: boolean, ro: number, E: number, id?: string, typ: 'material' | 'zatizeni' = 'material', hodnotaZatizeni?: number) {
         this.id = id || crypto.randomUUID();
         this.kladne = kladne;
         this.ro = ro;
         this.E = E;
-        
-        // Deduplikace vrcholů (odstraní body na sobě, které mohou vzniknout
-        // po boolean operacích v polygon-clipping)
-        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
+        this.typ = typ;
+        this.hodnotaZatizeni = hodnotaZatizeni;
 
+        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
         this.vrcholy = [];
         for (let i = 0; i < xd.length; i++) {
             this.vrcholy.push(new Vrchol(this.id, xd[i]!, yd[i]!));
         }
-
         this.vypocet();
     }
 
@@ -315,19 +317,31 @@ export class Polygon {
         this.kladne = kladne;
         this.ro = ro;
         this.E = E;
-        
-        // Stejná deduplikace jako v konstruktoru
-        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
 
+        const { x: xd, y: yd } = deduplikujVrcholy(x_values, y_values);
         this.vrcholy = [];
         for (let i = 0; i < xd.length; i++) {
             this.vrcholy.push(new Vrchol(this.id, xd[i]!, yd[i]!));
         }
-
         this.vypocet();
     }
 
     public vypocet(): void {
+        // Bypass pro bodové (1) a čárové (2) zatížení - nepočítáme průřez.
+        let unikatni = this.vrcholy.length;
+        if (unikatni >= 2 && this.vrcholy[0] === this.vrcholy[unikatni - 1]) unikatni--;
+        if (this.typ === 'zatizeni' && unikatni < 3) {
+            this.vysledky = {
+                smernice: [],
+                plocha: 0,
+                moment_setrvacnosti: [0, 0],
+                deviacni_moment: 0,
+                hmotnost: 0,
+                teziste: { x: 0, y: 0 }
+            };
+            return;
+        }
+
         // 4. ZMĚNA: Úprava validace a uzavření polygonu tak, aby pracovala s objekty Vrchol
         if (this.vrcholy.length < 3) {
             throw new Error("Pro výpočet zadejte alespoň 3 body");
@@ -485,7 +499,6 @@ export class SpravceTeles {
     //   3) Od každého materiálu odečte unii všech silnějších materiálů.
     //   4) Rozloží výsledek na polygony (kladné = outer, záporné = díry).
     public prepocitejEfektivni(): void {
-        // 1) Sestavení seznamu materiálů v pořadí priority
         const serazene: Array<{ E: number; ro: number }> = [];
         const videne = new Set<string>();
         for (const m of this.prioritaMaterialu) {
@@ -494,17 +507,18 @@ export class SpravceTeles {
             videne.add(key);
             serazene.push(m);
         }
+        // POZOR: pouze materiály (typ === 'material')
         for (const p of this.polygony) {
+            if (p.typ !== 'material') continue;
             const key = `${p.E}|${p.ro}`;
             if (videne.has(key)) continue;
             videne.add(key);
             serazene.push({ E: p.E, ro: p.ro });
         }
 
-        // Předpočítat polygony podle materiálu (klíč = "E|ro"), abychom
-        // nemuseli v každé iteraci procházet celé this.polygony.
         const podleMaterialu = new Map<string, Polygon[]>();
         for (const p of this.polygony) {
+            if (p.typ !== 'material') continue;
             const key = `${p.E}|${p.ro}`;
             if (!podleMaterialu.has(key)) podleMaterialu.set(key, []);
             podleMaterialu.get(key)!.push(p);
@@ -590,13 +604,13 @@ export class SpravceTeles {
     //   4) plné pohlcení: vnitřní polygon musí být CELÝ uvnitř některého
     //      negativu, aby to byl legitimní ostrůvek. Jinak je to kolize.
     public detekujKolize(): boolean {
-        // 1) Self-intersection u všech polygonů
+        // 1) Self-intersection jen u materiálů (zatížení nemá smysl)
         for (const P of this.polygony) {
+            if (P.typ !== 'material') continue;
             if (this.polygonSeProtinaSamSeSobou(P)) return true;
         }
-
-        const kladne = this.polygony.filter(p => p.kladne);
-        const zaporny = this.polygony.filter(p => !p.kladne);
+        const kladne = this.polygony.filter(p => p.typ === 'material' && p.kladne);
+        const zaporny = this.polygony.filter(p => p.typ === 'material' && !p.kladne);
 
         const rings = kladne.map(p =>
             p.x_val.map((x, k) => [x, p.y_val[k]!] as [number, number])
@@ -707,7 +721,7 @@ export class SpravceTeles {
                 seen.add(v.id);
                 unikatni.push({ id: v.id, x: v.x, y: v.y });
             }
-            return { id: p.id, kladne: p.kladne, ro: p.ro, E: p.E, vrcholy: unikatni };
+            return { id: p.id, kladne: p.kladne, ro: p.ro, E: p.E, typ: p.typ, hodnotaZatizeni: p.hodnotaZatizeni, vrcholy: unikatni };
         });
         this.multiIds = [...ids];
         this.editSession = { snapshot };
@@ -717,17 +731,12 @@ export class SpravceTeles {
     // pro každý materiál, kterého se změna dotkla. Stejná logika jako
     // pohnPolygonem, ale pro sadu vrcholů napříč polygony.
     public pohnMulti(deltaX: number, deltaY: number): { newIds: string[] } {
-        if (!this.editSession) {
-            return { newIds: [] };
-        }
+        if (!this.editSession) return { newIds: [] };
         this.obnovSnapshot();
 
         const idsSet = new Set(this.multiIds);
         const pozicePoPosunu: Array<{ x: number; y: number }> = [];
 
-        // 1) Posunout vybrané vrcholy a zapamatovat si nové pozice.
-        //    `vypocet()` voláme jen na polygonech, které měly opravdu posunutý
-        //    vrchol (ostatní se nemohly změnit).
         for (const p of this.polygony) {
             const n = p.vrcholy.length;
             const cnt = (n >= 2 && p.vrcholy[0] === p.vrcholy[n - 1]) ? n - 1 : n;
@@ -735,8 +744,7 @@ export class SpravceTeles {
             for (let i = 0; i < cnt; i++) {
                 const v = p.vrcholy[i]!;
                 if (idsSet.has(v.id)) {
-                    v.x += deltaX;
-                    v.y += deltaY;
+                    v.x += deltaX; v.y += deltaY;
                     pozicePoPosunu.push({ x: v.x, y: v.y });
                     zmena = true;
                 }
@@ -744,35 +752,38 @@ export class SpravceTeles {
             if (zmena) p.vypocet();
         }
 
-        // 2) Zjistit, které materiály jsou dotčeny
-        const materialy = new Set<string>();
+        // Klíče (typ + E/ro nebo hodnotaZatizeni)
+        const skupiny = new Map<string, { typ: 'material' | 'zatizeni'; E: number; ro: number; hodnotaZatizeni?: number | undefined }>();
         for (const p of this.polygony) {
             for (const v of p.vrcholy) {
-                if (idsSet.has(v.id)) {
-                    materialy.add(`${p.E}|${p.ro}`);
-                    break;
+                if (!idsSet.has(v.id)) continue;
+                const key = p.typ === 'material'
+                    ? `m|${p.E}|${p.ro}`
+                    : `z|${p.hodnotaZatizeni}`;
+                if (!skupiny.has(key)) {
+                    skupiny.set(key, { typ: p.typ, E: p.E, ro: p.ro, hodnotaZatizeni: p.hodnotaZatizeni });
                 }
+                break;
             }
         }
 
-        // 3) Merge
-        const vysledek: Polygon[] = this.polygony.filter(
-            p => !materialy.has(`${p.E}|${p.ro}`)
-        );
-        for (const key of materialy) {
-            const [Estr, rostr] = key.split('|');
-            const E = Number(Estr);
-            const ro = Number(rostr);
-            vysledek.push(...this.mergeMultiMaterial(E, ro, idsSet));
-        }
-        this.polygony = vysledek;
-        // POZNÁMKA: aktualizujPruseciky() se během dragu NEVOLÁ (je O(N² × m²)
-        // a pro velké polygony extrémně drahá). Přepočítá se až při commitu
-        // v App.svelte (viz aktualizujVysledky).
+        // Pro každou skupinu spustit merge
+        let vysledek: Polygon[] = this.polygony.filter(p => {
+            // Ponechat polygony, jejichž klíč není v žádné dotčené skupině
+            const key = p.typ === 'material' ? `m|${p.E}|${p.ro}` : `z|${p.hodnotaZatizeni}`;
+            return !skupiny.has(key);
+        });
 
-        // 4) Tracking pro UI: najít nová IDs vrcholů na zapamatovaných pozicích.
-        //    POZOR: this.multiIds NEMĚNÍME - zůstávají jako původní IDs ze
-        //    snapshotu, aby další frame mohl vrcholy znovu najít a posunout.
+        for (const s of skupiny.values()) {
+            if (s.typ === 'material') {
+                vysledek.push(...this.mergeMultiMaterial(s.E, s.ro, 'material', undefined, idsSet));
+            } else {
+                vysledek.push(...this.mergeMultiMaterial(0, 0, 'zatizeni', s.hodnotaZatizeni, idsSet));
+            }
+        }
+
+        this.polygony = vysledek;
+
         const newIds: string[] = [];
         const seen = new Set<string>();
         for (const poz of pozicePoPosunu) {
@@ -788,27 +799,30 @@ export class SpravceTeles {
     // Merge pro jeden materiál v multi-selekci. Stejná logika jako
     // pohnPolygonem, ale "editovaných polygonů" je více - všechny, které
     // mají alespoň jeden vrchol v `multiVrcholyIds`.
-    private mergeMultiMaterial(E: number, ro: number, multiVrcholyIds: Set<string>): Polygon[] {
-        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
+    private mergeMultiMaterial(E: number, ro: number, typ: 'material' | 'zatizeni', hodnotaZatizeni: number | undefined, multiVrcholyIds: Set<string>): Polygon[] {
+        const sameMat = this.polygony.filter(p => {
+            if (p.typ !== typ) return false;
+            if (typ === 'material') return p.E === E && p.ro === ro;
+            return p.hodnotaZatizeni === hodnotaZatizeni;
+        });
         if (sameMat.length === 0) return [];
 
-        // Detekce self-intersection (bowtie) na editovaných polygonech.
-        // Pokud některý editovaný polygon tvoří bowtie, nesmíme skipovat
-        // merge pipeline - polygon-clipping.union ho musí rozdělit na části.
-        // Testujeme jen editované polygony (s vybraným vrcholem), protože
-        // ostatní by měly být v pořádku a test je drahý (O(m²)).
+        // Bypass pro zatížení s 1-2 body: neslučujeme.
+        if (typ === 'zatizeni' && sameMat.some(p => {
+            let u = p.vrcholy.length;
+            if (u >= 2 && p.vrcholy[0] === p.vrcholy[u - 1]) u--;
+            return u < 3;
+        })) {
+            return sameMat;
+        }
+
         const maSelfIntersect = sameMat.some(p => {
             let editovany = false;
-            for (const v of p.vrcholy) {
-                if (multiVrcholyIds.has(v.id)) { editovany = true; break; }
-            }
+            for (const v of p.vrcholy) if (multiVrcholyIds.has(v.id)) { editovany = true; break; }
             return editovany && this.polygonSeProtinaSamSeSobou(p);
         });
 
-        // Skip pro jediný polygon - jen pokud nemá bowtie.
-        if (sameMat.length === 1 && !maSelfIntersect) {
-            return sameMat;
-        }
+        if (sameMat.length === 1 && !maSelfIntersect) return sameMat;
 
         // Editované polygony = ty s alespoň jedním vrcholem v multiVrcholyIds
         const editedIds = new Set<string>();
@@ -959,10 +973,10 @@ export class SpravceTeles {
         const newPolys: Polygon[] = [];
         for (const part of merged) {
             const outer = part[0]!;
-            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E, undefined, typ, hodnotaZatizeni));
             for (let h = 1; h < part.length; h++) {
                 const hole = part[h]!;
-                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E, undefined, typ, hodnotaZatizeni));
             }
         }
         const sortedNewPolys = this.sortByDepth(newPolys);
@@ -1185,16 +1199,15 @@ export class SpravceTeles {
     //   kladný = union, záporný = difference.
     // Toto pořadí odpovídá pořadí, v jakém je uživatel vytvářel, což dává
     // správný výsledek (P1, díra H, ostrůvek N, mostek B, …).
-    public resolveMaterial(E: number, ro: number): polygonClipping.MultiPolygon {
+    public resolveMaterial(E: number, ro: number, typ: 'material' | 'zatizeni' = 'material', hodnotaZatizeni?: number): polygonClipping.MultiPolygon {
         let result: polygonClipping.MultiPolygon = [];
         for (const poly of this.polygony) {
-            if (poly.E !== E || poly.ro !== ro) continue;
+            if (poly.typ !== typ) continue;
+            if (typ === 'material' && (poly.E !== E || poly.ro !== ro)) continue;
+            if (typ === 'zatizeni' && poly.hodnotaZatizeni !== hodnotaZatizeni) continue;
             const ring = poly.x_val.map((x, i) => [x, poly.y_val[i]!] as [number, number]);
-            if (poly.kladne) {
-                result = polygonClipping.union(result, [ring]);
-            } else {
-                result = polygonClipping.difference(result, [ring]);
-            }
+            if (poly.kladne) result = polygonClipping.union(result, [ring]);
+            else result = polygonClipping.difference(result, [ring]);
         }
         return result;
     }
@@ -1319,56 +1332,42 @@ export class SpravceTeles {
     }
 
     // --- NOVÁ METODA PRO MODELOVÁNÍ TVARŮ (BOOLEAN OPERACE) ---
-    public zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean): void {
-        const novyKruh = x_coords.map((x, i) => [x, y_coords[i]!] as [number, number]);
+    public zpracujNovyTvar(x_coords: number[], y_coords: number[], E: number, ro: number, jeToPlus: boolean, typ: 'material' | 'zatizeni' = 'material', hodnotaZatizeni?: number): void {
+        // Pro zatížení s 1-2 body nepočítáme boolean pipeline - jen přidáme polygon.
+        // Bodové a čárové zatížení nemá smysl slučovat/odečítat přes polygon-clipping.
+        if (typ === 'zatizeni' && x_coords.length < 3) {
+            const novyPoly = new Polygon(x_coords, y_coords, jeToPlus, ro, E, undefined, 'zatizeni', hodnotaZatizeni);
+            this.polygony = [...this.polygony, novyPoly];
+            return;
+        }
 
-        // Ochranná brzda: degenerovaný vstup
+        const novyKruh = x_coords.map((x, i) => [x, y_coords[i]!] as [number, number]);
         if (plochaRingu(novyKruh) < 1e-6) return;
 
-        // 1) Aktuální materiál (E, ro) jako MultiPolygon (v pořadí, v jakém byl
-        //    vytvářen – to je důležité pro správné vyhodnocení boolean operací).
-        const current = this.resolveMaterial(E, ro);
+        const current = this.resolveMaterial(E, ro, typ, hodnotaZatizeni);
 
-        // 2) Aplikace nového tvaru: + = union, − = difference.
-        //    Tím se přirozeně vyřeší VŠECHNY případy: sloučení dvou kusů,
-        //    vyplnění části otvoru, odečtení přes ostrůvek, obkreslení atd.
         let newMaterial: polygonClipping.MultiPolygon;
-        if (jeToPlus) {
-            newMaterial = polygonClipping.union(current, [novyKruh]);
-        } else {
-            newMaterial = polygonClipping.difference(current, [novyKruh]);
-        }
+        if (jeToPlus) newMaterial = polygonClipping.union(current, [novyKruh]);
+        else newMaterial = polygonClipping.difference(current, [novyKruh]);
         newMaterial = vycistiMultiPolygon(newMaterial);
 
-        // 3) Polygony jiných materiálů necháváme beze změny.
-        const otherPolys = this.polygony.filter(p => p.E !== E || p.ro !== ro);
+        // Zachovat ostatní polygony (jiný typ, jiný materiál, jiná hodnota zatížení)
+        const otherPolys = this.polygony.filter(p => {
+            if (p.typ !== typ) return true;
+            if (typ === 'material') return p.E !== E || p.ro !== ro;
+            return p.hodnotaZatizeni !== hodnotaZatizeni;
+        });
 
-        // 4) Re-dekompozice: každý „kus" MultiPolygonu → kladný Polygon s vnějším ringem
-        //    + záporné Polygony pro každou díru. Ostrůvky uvnitř děr vyjdou jako
-        //    samostatné kladné polygony (přesně jako když je uživatel nakreslí).
         const newPolys: Polygon[] = [];
         for (const part of newMaterial) {
             const outer = part[0]!;
-            const outerX = outer.map(p => p[0]);
-            const outerY = outer.map(p => p[1]);
-            newPolys.push(new Polygon(outerX, outerY, true, ro, E));
-
+            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E, undefined, typ, hodnotaZatizeni));
             for (let h = 1; h < part.length; h++) {
                 const hole = part[h]!;
-                const holeX = hole.map(p => p[0]);
-                const holeY = hole.map(p => p[1]);
-                newPolys.push(new Polygon(holeX, holeY, false, ro, E));
+                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E, undefined, typ, hodnotaZatizeni));
             }
         }
-
-        // 5) Seřadit podle hloubky vnoření, aby budoucí resolveMaterial()
-        //    vyhodnocoval v pořadí: vnější kladný → jeho díry → ostrůvky v dírách → …
-        //    (Bez tohoto by mohl polygon-clipping vrátit kusy v libovolném pořadí
-        //    a ostrůvek by se v dalším kroku mohl chovat jako by nebyl.)
-        const sortedNewPolys = this.sortByDepth(newPolys);
-
-        // 6) Nahradit polygony tohoto materiálu; ostatní materiály zachovat.
-        this.polygony = [...otherPolys, ...sortedNewPolys];
+        this.polygony = [...otherPolys, ...this.sortByDepth(newPolys)];
     }
 
     // Normalizuje jeden materiál: vezme všechny jeho polygony, seřadí je
@@ -1376,8 +1375,12 @@ export class SpravceTeles {
     // a výsledný MultiPolygon rozloží zpět na polygony a díry.
     // Tím se stav srovná do kanonické podoby i po deletech, které mohly
     // rozhodit geometrické vztahy (např. otvor vyčnívající z rodiče).
-    private normalizujMaterial(E: number, ro: number): Polygon[] {
-        const sameMat = this.polygony.filter(p => p.E === E && p.ro === ro);
+    private normalizujMaterial(E: number, ro: number, typ: 'material' | 'zatizeni' = 'material', hodnotaZatizeni?: number): Polygon[] {
+        const sameMat = this.polygony.filter(p => {
+            if (p.typ !== typ) return false;
+            if (typ === 'material') return p.E === E && p.ro === ro;
+            return p.hodnotaZatizeni === hodnotaZatizeni;
+        });
         if (sameMat.length === 0) return [];
 
         const ordered = this.sortByDepth(sameMat);
@@ -1396,10 +1399,10 @@ export class SpravceTeles {
         const newPolys: Polygon[] = [];
         for (const part of merged) {
             const outer = part[0]!;
-            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E));
+            newPolys.push(new Polygon(outer.map(p => p[0]), outer.map(p => p[1]), true, ro, E, undefined, typ, hodnotaZatizeni));
             for (let h = 1; h < part.length; h++) {
                 const hole = part[h]!;
-                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E));
+                newPolys.push(new Polygon(hole.map(p => p[0]), hole.map(p => p[1]), false, ro, E, undefined, typ, hodnotaZatizeni));
             }
         }
         return this.sortByDepth(newPolys);
@@ -1410,15 +1413,24 @@ export class SpravceTeles {
     public normalizujVsechnyMaterialy(): void {
         if (this.polygony.length === 0) return;
 
-        const materials = new Map<string, { E: number; ro: number }>();
+        // Rozdělit podle typu
+        const materialy = new Map<string, { E: number; ro: number }>();
+        const zatizeni = new Set<number>();
         for (const p of this.polygony) {
-            const key = `${p.E}|${p.ro}`;
-            if (!materials.has(key)) materials.set(key, { E: p.E, ro: p.ro });
+            if (p.typ === 'material') {
+                const key = `${p.E}|${p.ro}`;
+                if (!materialy.has(key)) materialy.set(key, { E: p.E, ro: p.ro });
+            } else if (p.typ === 'zatizeni' && p.hodnotaZatizeni !== undefined) {
+                zatizeni.add(p.hodnotaZatizeni);
+            }
         }
 
         const all: Polygon[] = [];
-        for (const { E, ro } of materials.values()) {
-            all.push(...this.normalizujMaterial(E, ro));
+        for (const { E, ro } of materialy.values()) {
+            all.push(...this.normalizujMaterial(E, ro, 'material', undefined));
+        }
+        for (const hodnota of zatizeni.values()) {
+            all.push(...this.normalizujMaterial(0, 0, 'zatizeni', hodnota));
         }
         this.polygony = all;
     }
@@ -1725,9 +1737,11 @@ export class SpravceTeles {
     private obnovSnapshot(): void {
         if (!this.editSession) return;
         this.polygony = this.editSession.snapshot.map(s => {
-            // Vytvoříme polygon s dummy vrcholy, které projdou konstruktorem (3 body),
-            // a vzápětí přepíšeme vrcholy těmi ze snapshotu (i s jejich ID).
-            const p = new Polygon([0, 0, 1], [0, 1, 0], s.kladne, s.ro, s.E, s.id);
+            const p = new Polygon(
+                [0, 0, 1], [0, 1, 0],
+                s.kladne, s.ro, s.E, s.id,
+                s.typ, s.hodnotaZatizeni
+            );
             p.vrcholy = s.vrcholy.map(v => new Vrchol(s.id, v.x, v.y, v.id));
             p.vypocet();
             return p;
@@ -1754,104 +1768,78 @@ export class SpravceTeles {
 
     // --- POMOCNÁ METODA PRO VÝPOČET NÁHRADNÍCH SIL ---
     // Změněno: odstraněno "export function", nyní je to běžná metoda třídy
-    prevodZatizeniNaSily(zatizeni: ZadaniZatizeni[]) {
-        let Fz_celk = 0;
-        let Mx_celk = 0;
-        let My_celk = 0;
+    prevodZatizeniNaSily() {
+        let Fz_celk = 0, Mx_celk = 0, My_celk = 0;
+        for (const p of this.polygony) {
+            if (p.typ !== 'zatizeni') continue;
+            const nasobitel = p.kladne ? 1 : -1;
+            const hodnota = (p.hodnotaZatizeni ?? 0) * nasobitel;
+            const x_m = p.x_val.map(x => x / 1000);
+            const y_m = p.y_val.map(y => y / 1000);
 
-        for (const z of zatizeni) {
-            const pocetBodu = z.x_val.length;
-            
-            // Převod souřadnic z mm na metry pro fyzikální výpočet
-            const x_m = z.x_val.map(x => x / 1000);
-            const y_m = z.y_val.map(y => y / 1000);
+            // Pro případ 1-2 bodů odstranit uzavírací bod
+            let xp = x_m, yp = y_m;
+            if (xp.length >= 2 && xp[0] === xp[xp.length - 1] && yp[0] === yp[yp.length - 1]) {
+                xp = xp.slice(0, -1); yp = yp.slice(0, -1);
+            }
 
-            if (pocetBodu === 1) {
-                // A) BODOVÉ ZATÍŽENÍ (1 bod)
-                // Přidány vykřičníky pro ujištění TypeScriptu, že hodnota existuje
-                const F = z.hodnota;
-                Fz_celk += F;
-                Mx_celk += F * y_m[0]!;
-                My_celk += F * x_m[0]!;
-                
-            } else if (pocetBodu === 2) {
-                // B) LINIOVÉ ZATÍŽENÍ (2 body)
-                const dx = x_m[1]! - x_m[0]!;
-                const dy = y_m[1]! - y_m[0]!;
+            if (xp.length === 1) {
+                const F = hodnota;
+                Fz_celk += F; Mx_celk += F * yp[0]!; My_celk += F * xp[0]!;
+            } else if (xp.length === 2) {
+                const dx = xp[1]! - xp[0]!, dy = yp[1]! - yp[0]!;
                 const delka_m = Math.sqrt(dx * dx + dy * dy);
-                
-                const F = z.hodnota * delka_m;
-                const stred_x = (x_m[0]! + x_m[1]!) / 2;
-                const stred_y = (y_m[0]! + y_m[1]!) / 2;
-                
-                Fz_celk += F;
-                Mx_celk += F * stred_y;
-                My_celk += F * stred_x;
-                
-            } else if (pocetBodu >= 3) {
-                // C) PLOŠNÉ ZATÍŽENÍ (3 a více bodů = polygon)
+                const F = hodnota * delka_m;
+                Fz_celk += F; Mx_celk += F * (yp[0]! + yp[1]!) / 2; My_celk += F * (xp[0]! + xp[1]!) / 2;
+            } else if (xp.length >= 3) {
+                // ... stávající logika pro plošné zatížení (plocha pod vektorem, těžiště) ...
+                // pozor: nasobitel = kladne ? 1 : -1 se aplikuje na plochu (odečtení = díra)
                 let plocha_a_smer = 0;
-                let suma_moment_plochy_x_kladne = 0;
-                let suma_moment_plochy_x_zaporne = 0;
-                let suma_moment_plochy_y_kladne = 0;
-                let suma_moment_plochy_y_zaporne = 0;
-
-                for (let i = 0; i < pocetBodu; i++) {
-                    const j = (i + 1) % pocetBodu;
-                    const x1 = x_m[i]!;
-                    const y1 = y_m[i]!;
-                    const x2 = x_m[j]!;
-                    const y2 = y_m[j]!;
-
+                let suma_moment_x_kladne = 0, suma_moment_x_zaporne = 0;
+                let suma_moment_y_kladne = 0, suma_moment_y_zaporne = 0;
+                for (let i = 0; i < xp.length; i++) {
+                    const j = (i + 1) % xp.length;
+                    const x1 = xp[i]!, y1 = yp[i]!;
+                    const x2 = xp[j]!, y2 = yp[j]!;
                     const dx = x2 - x1;
-                    if (Math.abs(dx) < 1e-12) continue; // Svislá čára netvoří plochu pod vektorem
-
+                    if (Math.abs(dx) < 1e-12) continue;
                     const plocha_pod = plochaPodVektorem(x1, x2, y1, y2);
                     const abs_plocha_pod = Math.abs(plocha_pod);
                     const [xt_pod, yt_pod] = tezistePlochyPodVektorem(x1, x2, y1, y2);
-                    
-                    // Zásadní oprava: plocha_a_smer se musí sčítat/odečítat přesně podle dx, 
-                    // aby to drželo krok s momenty a poznalo to CW / CCW směr zadání.
                     if (dx > 0) {
                         plocha_a_smer += abs_plocha_pod;
-                        suma_moment_plochy_x_kladne += abs_plocha_pod * xt_pod;
-                        suma_moment_plochy_y_kladne += abs_plocha_pod * yt_pod;
+                        suma_moment_x_kladne += abs_plocha_pod * xt_pod;
+                        suma_moment_y_kladne += abs_plocha_pod * yt_pod;
                     } else if (dx < 0) {
                         plocha_a_smer -= abs_plocha_pod;
-                        suma_moment_plochy_x_zaporne += abs_plocha_pod * xt_pod;
-                        suma_moment_plochy_y_zaporne += abs_plocha_pod * yt_pod;
+                        suma_moment_x_zaporne += abs_plocha_pod * xt_pod;
+                        suma_moment_y_zaporne += abs_plocha_pod * yt_pod;
                     }
                 }
-
                 const plocha_abs = Math.abs(plocha_a_smer);
-                let teziste_x_m = 0;
-                let teziste_y_m = 0;
-
-                // Sloučení těžiště přesně podle tvé definice (funguje obousměrně)
+                let teziste_x_m = 0, teziste_y_m = 0;
                 if (plocha_abs > 1e-12) {
                     if (plocha_a_smer > 0) {
-                        teziste_x_m = (suma_moment_plochy_x_kladne - suma_moment_plochy_x_zaporne) / plocha_abs;
-                        teziste_y_m = (suma_moment_plochy_y_kladne - suma_moment_plochy_y_zaporne) / plocha_abs;
+                        teziste_x_m = (suma_moment_x_kladne - suma_moment_x_zaporne) / plocha_abs;
+                        teziste_y_m = (suma_moment_y_kladne - suma_moment_y_zaporne) / plocha_abs;
                     } else {
-                        teziste_x_m = (-suma_moment_plochy_x_kladne + suma_moment_plochy_x_zaporne) / plocha_abs;
-                        teziste_y_m = (-suma_moment_plochy_y_kladne + suma_moment_plochy_y_zaporne) / plocha_abs;
+                        teziste_x_m = (-suma_moment_x_kladne + suma_moment_x_zaporne) / plocha_abs;
+                        teziste_y_m = (-suma_moment_y_kladne + suma_moment_y_zaporne) / plocha_abs;
                     }
                 }
-
-                const F = z.hodnota * plocha_abs; 
-                
-                Fz_celk += F;
-                Mx_celk += F * teziste_y_m;
-                My_celk += F * teziste_x_m;
+                const F = hodnota * plocha_abs;
+                Fz_celk += F; Mx_celk += F * teziste_y_m; My_celk += F * teziste_x_m;
             }
         }
-
         return { Fz: Fz_celk, Mx: Mx_celk, My: My_celk };
     }
 
     // --- HLAVNÍ METODA PRO VÝPOČET ROVNICE ROVINY NAPĚTÍ ---
-    spocitejRovniceNapeti(zatizeni: ZadaniZatizeni[]): SouhrnRovnicNapeti {
-        const sily = this.prevodZatizeniNaSily(zatizeni);
+    // Parametr `_zatizeni` je ponechán kvůli zpětné kompatibilitě volání
+    // (App.svelte může volat se argumentem). Skutečná data čte
+    // prevodZatizeniNaSily() přímo z this.polygony (typ === 'zatizeni').
+    spocitejRovniceNapeti(_zatizeni?: ZadaniZatizeni[]): SouhrnRovnicNapeti {
+        const sily = this.prevodZatizeniNaSily();
         const celk = this.spocitejCelkove();
 
         // Příprava konstant pro Navierův vzorec (v metrech)
