@@ -225,6 +225,13 @@ export interface ZadaniZatizeni {
 // --- NOVÉ OBECNÉ ROZHRANÍ PRO VÝSLEDEK ---
 export interface SouhrnRovnicNapeti {
     rovnice: RovniceNapeti[];
+    a_ref_mm: number;      // koef. lineárního členu a (Pa/mm)
+    b_ref_mm: number;      // koef. lineárního členu b (Pa/mm)
+    c_ref_pa: number;      // konstanta (Pa) - sigma(x_mm, y_mm) = a_ref_mm*x_mm + b_ref_mm*y_mm + c_ref_pa
+    abs_max_pa: number;    // max(|min|, |max|) přes efektivní průřez (skutečné sigma_i)
+    actual_max_pa: number; // reálné max napětí na průřezu
+    actual_min_pa: number; // reálné min napětí na průřezu
+    E_ref_used: number;    // E_ref, který byl skutečně použit (max nebo zvolený)
     a_null_line?: number;
     b_null_line?: number;
     x_null_line?: number;
@@ -1898,7 +1905,8 @@ export class SpravceTeles {
             throw new Error("Geometrie má nulovou nebo neplatnou tuhost.");
         }
 
-        const E_ref = this.zvolene_E_ref ?? Math.max(...this.polygony.map(p => p.E));
+        const materialy = this.polygony.filter(p => p.typ === 'material');
+        const E_ref = this.zvolene_E_ref ?? (materialy.length > 0 ? Math.max(...materialy.map(p => p.E)) : 1);
 
         const a_ref = (My_t * Ix_m4 - Mx_t * Dxy_m4) / jmenovatel; 
         const b_ref = (Mx_t * Iy_m4 - My_t * Dxy_m4) / jmenovatel; 
@@ -1909,7 +1917,10 @@ export class SpravceTeles {
         let global_b_null: number | undefined = undefined;
         let global_x_null: number | undefined = undefined;
 
-        const rovnice = this.polygony.map((poly, index) => {
+        // Rovnici počítáme jen pro EFEKTIVNÍ polygony (materiály).
+        // 1-2 bodová zatížení nemají dost vrcholů pro výpočet roviny,
+        // takže by iterace přes this.polygony vyhodila TypeError.
+        const rovnice = this.efektivniPolygony.map((poly, index) => {
             const body = poly.x_val.slice(0, 3).map((x, i) => ({ 
                 x: x / 1000, 
                 y: poly.y_val[i]! / 1000 
@@ -2033,9 +2044,43 @@ export class SpravceTeles {
             };
         });
 
-        // Návrat celého objektu (rovnice + globální parametry)
+        // --- GLOBÁLNÍ HODNOTY PRO GRADIENT NAPĚTÍ ---
+        // a_ref_mm, b_ref_mm: směr gradientu v Pa/mm
+        // c_ref_pa: konstanta tak, aby sigma_ref(x_mm, y_mm) = a_ref_mm*x_mm + b_ref_mm*y_mm + c_ref_pa
+        const a_ref_mm = a_ref / 1000;
+        const b_ref_mm = b_ref / 1000;
+        const c_ref_pa = (N / A_m2) - a_ref * xt_m - b_ref * yt_m;
+
+        // abs_max_pa: největší |sigma_i| přes všechny vrcholy efektivního průřezu
+        // (sigma_i = sigma_ref * E_i / E_ref, takže různé materiály mají různé napětí)
+        let abs_max_pa = 0;
+        let actual_max_pa = -Infinity;
+        let actual_min_pa = Infinity;
+        for (const poly of this.efektivniPolygony) {
+            const n = poly.E / E_ref;
+            for (let i = 0; i < poly.x_val.length; i++) {
+                const x_m = poly.x_val[i]! / 1000;
+                const y_m = poly.y_val[i]! / 1000;
+                const s_i = n * ((N / A_m2) + a_ref * (x_m - xt_m) + b_ref * (y_m - yt_m));
+                const as = Math.abs(s_i);
+                if (as > abs_max_pa) abs_max_pa = as;
+                if (s_i > actual_max_pa) actual_max_pa = s_i;
+                if (s_i < actual_min_pa) actual_min_pa = s_i;
+            }
+        }
+        if (!Number.isFinite(actual_max_pa)) actual_max_pa = 0;
+        if (!Number.isFinite(actual_min_pa)) actual_min_pa = 0;
+
+        // Návrat celého objektu (rovnice + globální parametry pro gradient)
         return {
             rovnice,
+            a_ref_mm,
+            b_ref_mm,
+            c_ref_pa,
+            abs_max_pa,
+            actual_max_pa,
+            actual_min_pa,
+            E_ref_used: E_ref,
             ...(global_a_null !== undefined ? { a_null_line: global_a_null } : {}),
             ...(global_b_null !== undefined ? { b_null_line: global_b_null } : {}),
             ...(global_x_null !== undefined ? { x_null_line: global_x_null } : {})

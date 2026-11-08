@@ -10,6 +10,15 @@ import {
 import { SpravceTeles } from "@arcora/cross_section_module/cs";
 import type { ZadaniZatizeni } from "@arcora/cross_section_module/cs";
 
+// --- OPRAVA ZATÍŽENÍ ---
+
+function pridejZatizeni(spravce: SpravceTeles, hodnota: number, x_val: number[], y_val: number[]) {
+  // Pro 1-2 body (bodové/liniové) se použije bypass v zpracujNovyTvar,
+  // pro 3+ body (plošné) se použije plná merge pipeline.
+  spravce.zpracujNovyTvar(x_val, y_val, 0, 0, true, 'zatizeni', hodnota);
+}
+
+
 // --- NEZÁVISLÉ GEOMETRICKÉ FUNKCE ---
 
 describe("Výpočty pod vektorem - plochaPodVektorem", () => {
@@ -1063,14 +1072,10 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         // Nezpůsobuje žádný ohyb (Mx=0, My=0). 
         // Napětí musí být konstantní po celém průřezu: sigma = N / A = 8000 / 8 = 1000
         // Rovnice roviny: z = 0x + 0y + 1000
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 8000,
-            x_val: [2],
-            y_val: [1]
-        }];
+        pridejZatizeni(spravce, 8000, [2], [1]);
 
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         
         expect(vysledky.rovnice.length).toBe(1);
         const rovina = vysledky.rovnice[0]!;
@@ -1084,14 +1089,10 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         // Plošné zatížení 1000 N/m² nanesené přesně na náš polygon 4x2
         // Náhradní síla: 1000 * 8 = 8000 N, působí v těžišti [2, 1]
         // Výsledek musí být identický jako u centrického tlaku: z = 0x + 0y + 1000
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 1000,
-            x_val: [0, 4, 4, 0],
-            y_val: [0, 0, 2, 2]
-        }];
+        pridejZatizeni(spravce, 1000, [0, 4, 4, 0], [0, 0, 2, 2]);
 
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovina = vysledky.rovnice[0]!;
 
         expect(rovina.a_plane).toBeCloseTo(0, 4);
@@ -1104,14 +1105,10 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         // Excentricita ey = +1 m (posun od těžiště [2,1] směrem nahoru)
         // Vyvolá ohybový moment Mx = 8000 * 1 = 8000 Nm
         // Podle Navierovy rovnice vyjde rovina: z = 0x + 3000y - 2000
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 8000,
-            x_val: [2],
-            y_val: [2]
-        }];
+        pridejZatizeni(spravce, 8000, [2], [2]);
 
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovina = vysledky.rovnice[0]!;
 
         // Očekáváme z = 0x + 3000y - 2000
@@ -1126,14 +1123,10 @@ describe("Výpočet průběhu napětí - spocitejRovniceNapeti", () => {
         // Excentricita ey = -1 m (posun dolů)
         // Vyvolá ohybový moment Mx = -8000 Nm
         // Rovina by měla být opačně nakloněná: z = 0x - 3000y + 4000
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 2000,
-            x_val: [0, 4],
-            y_val: [0, 0]
-        }];
+        pridejZatizeni(spravce, 2000, [0, 4], [0, 0]);
 
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovina = vysledky.rovnice[0]!;
 
         expect(rovina.a_plane).toBeCloseTo(0, 4);
@@ -1158,13 +1151,9 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("1. Čistý centrický tlak - Napětí se skokově mění podle tuhosti materiálu", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 40000,
-            x_val: [50],
-            y_val: [25]
-        }];
+        pridejZatizeni(spravce, 40000, [50], [25]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         expect(vysledky.rovnice.length).toBe(2);
         
         const rovinaPoly1 = vysledky.rovnice[0]!; 
@@ -1181,13 +1170,9 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("2. Excentrický tlak (Ohyb) - Rovina napětí má odlišný sklon pro každý materiál", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 40000,
-            x_val: [50],
-            y_val: [35]
-        }];
+        pridejZatizeni(spravce, 40000, [50], [35]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
 
@@ -1201,13 +1186,9 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("3. Liniové zatížení", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: 2000,
-            x_val: [75, 25],
-            y_val: [25, 25]
-        }];
+        pridejZatizeni(spravce, 2000, [75, 25], [25, 25]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
 
@@ -1222,13 +1203,9 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("4. Plošné zatížení", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -500,
-            x_val: [30, 70, 70, 30],
-            y_val: [50, 50, 40, 40]
-        }];
+        pridejZatizeni(spravce, -500, [30, 70, 70, 30], [50, 50, 40, 40]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
 
@@ -1242,13 +1219,9 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("5. Necentrické zatížení", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -30,
-            x_val: [10],
-            y_val: [40]
-        }];
+        pridejZatizeni(spravce, -30, [10], [40]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
 
@@ -1262,17 +1235,10 @@ describe("Výpočet napětí s odlišnými materiály (Rozdílné E) - spocitejR
     });
 
     it("6. Necentrické zatížení, 2 síly", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -30,
-            x_val: [10],
-            y_val: [40]
-        }, {
-            hodnota: -20,
-            x_val: [20],
-            y_val: [50]
-        }];
+        pridejZatizeni(spravce, -30, [10], [40]);
+        pridejZatizeni(spravce, -20, [20], [50]);
 
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
 
@@ -1301,18 +1267,11 @@ describe("Výpočet napětí pro náhodný průřez s nahodným zatížením", (
         spravce.spocitejCelkove(); 
     });
         it("1. Necentrické zatížení, 1 bodová síla, 1 linearní zatížení", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -25,
-            x_val: [-100],
-            y_val: [250]
-        }, {
-            hodnota: 8.06226,
-            x_val: [140],
-            y_val: [35]
-        }];
+        pridejZatizeni(spravce, -25, [-100], [250]);
+        pridejZatizeni(spravce, 8.06226, [140], [35]);
 
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
@@ -1345,18 +1304,11 @@ describe("Výpočet napětí pro demonstrativní průřez z bakalářky", () => 
         spravce.spocitejCelkove(); 
     });
         it("1. Necentrické zatížení, 1 bodová síla, 1 linearní zatížení", () => {
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -19.231,
-            x_val: [150],
-            y_val: [0]
-        }, {
-            hodnota: 19.231,
-            x_val: [150],
-            y_val: [260]
-        }];
+        pridejZatizeni(spravce, -19.231, [150], [0]);
+        pridejZatizeni(spravce, 19.231, [150], [260]);
         
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
         
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
@@ -1391,18 +1343,11 @@ describe("Výpočet napětí a směrnice nulových přímek napětí pro náhodn
         
         spravce.zvolene_E_ref = 180;
 
-        const zatizeni: ZadaniZatizeni[] = [{
-            hodnota: -25,
-            x_val: [-100],
-            y_val: [250]
-        }, {
-            hodnota: 8.06226,
-            x_val: [140],
-            y_val: [35]
-        }];
+        pridejZatizeni(spravce, -25, [-100], [250]);
+        pridejZatizeni(spravce, 8.06226, [140], [35]);
         
         spravce.prepocitejEfektivni();
-        const vysledky = spravce.spocitejRovniceNapeti(zatizeni);
+        const vysledky = spravce.spocitejRovniceNapeti();
 
         const rovinaPoly1 = vysledky.rovnice[0]!; 
         const rovinaPoly2 = vysledky.rovnice[1]!; 
